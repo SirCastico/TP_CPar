@@ -23,73 +23,51 @@
  Wayne NJ 07470
  
  */
-#include<stdio.h>
-#include<stdlib.h>
-#include<math.h>
-#include<string.h>
-
-
-// Number of particles
-int N;
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+#include <stdbool.h>
+#include <stdalign.h>
 
 //  Lennard-Jones parameters in natural units!
-double sigma = 1.;
-double epsilon = 1.;
-double m = 1.;
-double kB = 1.;
+const double sigma = 1.;
+const double epsilon = 1.;
+const double m = 1.;
+const double kB = 1.;
 
-double NA = 6.022140857e23;
-double kBSI = 1.38064852e-23;  // m^2*kg/(s^2*K)
+const double NA = 6.022140857e23;
+const double kBSI = 1.38064852e-23;  // m^2*kg/(s^2*K)
 
-//  Size of box, which will be specified in natural units
-double L;
 
-//  Initial Temperature in Natural Units
-double Tinit;  //2;
-//  Vectors!
-//
+// Maximum particles
 const int MAXPART=5001;
-//  Position
-double r[MAXPART][3];
-//  Velocity
-double v[MAXPART][3];
-//  Acceleration
-double a[MAXPART][3];
-//  Force
-double F[MAXPART][3];
 
-// atom type
-char atype[10];
 //  Function prototypes
 //  initialize positions on simple cubic lattice, also calls function to initialize velocities
-void initialize();  
+void initialize(int N, double Tinit, double L, double r[restrict N][3], double v[restrict N][3]);  
 //  update positions and velocities using Velocity Verlet algorithm 
 //  print particle coordinates to file for rendering via VMD or other animation software
 //  return 'instantaneous pressure'
-double VelocityVerlet(double dt, int iter, FILE *fp);  
+double VelocityVerlet(int N, double L, double dt, int iter, FILE *fp, double r[restrict N][3], double v[restrict N][3], double a[restrict N][3]);  
 //  Compute Force using F = -dV/dr
 //  solve F = ma for use in Velocity Verlet
-void computeAccelerations();
+void computeAccelerations(int N, double r[restrict N][3], double a[restrict N][3]);
 //  Numerical Recipes function for generation gaussian distribution
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
-void initializeVelocities();
+void initializeVelocities(int N, double Tinit, double v[restrict N][3]);
 //  Compute total potential energy from particle coordinates
-double Potential();
+double Potential(int N, double r[restrict N][3]);
 //  Compute mean squared velocity from particle velocities
-double MeanSquaredVelocity();
+double MeanSquaredVelocity(int N, double v[restrict N][3]);
 //  Compute total kinetic energy from particle mass and velocities
-double Kinetic();
+double Kinetic(int N, double v[restrict N][3]);
 
 int main()
 {
-    
-    //  variable delcarations
-    int i;
-    double dt, Vol, Temp, Press, Pavg, Tavg, rho;
-    double VolFac, TempFac, PressFac, timefac;
-    double KE, PE, mvs, gc, Z;
-    char trash[10000], prefix[1000], tfn[1000], ofn[1000], afn[1000];
+    //  Files and filenames 
+    char prefix[1000], tfn[1000], ofn[1000], afn[1000];
     FILE *infp, *tfp, *ofp, *afp;
     
     
@@ -135,8 +113,13 @@ int main()
     printf("  FOR KRYPTON, TYPE 'Kr' THEN PRESS 'return' TO CONTINUE\n");
     printf("  FOR XENON,   TYPE 'Xe' THEN PRESS 'return' TO CONTINUE\n");
     printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+
+    // atom type
+    char atype[10];
+
     scanf("%s",atype);
     
+    double VolFac, TempFac, PressFac, timefac;
     if (strcmp(atype,"He")==0) {
         
         VolFac = 1.8399744000000005e-29;
@@ -195,6 +178,10 @@ int main()
     printf("\n  YOU WILL NOW ENTER A FEW SIMULATION PARAMETERS\n");
     printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
     printf("\n\n  ENTER THE INTIAL TEMPERATURE OF YOUR GAS IN KELVIN\n");
+
+    //  Initial Temperature in Natural Units
+    double Tinit;  //2;
+
     scanf("%lf",&Tinit);
     // Make sure temperature is a positive number!
     if (Tinit<0.) {
@@ -209,10 +196,13 @@ int main()
     printf("  FOR REFERENCE, NUMBER DENSITY OF AN IDEAL GAS AT STP IS ABOUT 40 moles/m^3\n");
     printf("  NUMBER DENSITY OF LIQUID ARGON AT 1 ATM AND 87 K IS ABOUT 35000 moles/m^3\n");
     
+    double rho;
     scanf("%lf",&rho);
     
-    N = 10*216;
-    Vol = N/(rho*NA);
+    // Number of particles
+    int N = 10*216;
+
+    double Vol = N/(rho*NA);
     
     Vol /= VolFac;
     
@@ -237,7 +227,7 @@ int main()
     }
     // Vol = L*L*L;
     // Length of the box in natural units:
-    L = pow(Vol,(1./3));
+    double L = pow(Vol,(1./3));
     
     //  Files that we can write different quantities to
     tfp = fopen(tfn,"w");     //  The MD trajectory, coordinates of every particle at each timestep
@@ -245,6 +235,7 @@ int main()
     afp = fopen(afn,"w");    //  Average T, P, gc, etc from the simulation
     
     int NumTime;
+    double dt;
     if (strcmp(atype,"He")==0) {
         
         // dt in natural units of time s.t. in SI it is 5 f.s. for all other gasses
@@ -260,14 +251,23 @@ int main()
         
     }
     
+    //  Position
+    double r[MAXPART][3];
+    //  Velocity
+    double v[MAXPART][3];
+    //  Acceleration
+    double a[MAXPART][3];
+    //  Force
+    double F[MAXPART][3];
+
     //  Put all the atoms in simple crystal lattice and give them random velocities
     //  that corresponds to the initial temperature we have specified
-    initialize();
+    initialize(N, Tinit, L, r, v);
     
     //  Based on their positions, calculate the ininial intermolecular forces
     //  The accellerations of each particle will be defined from the forces and their
     //  mass, and this will allow us to update their positions via Newton's law
-    computeAccelerations();
+    computeAccelerations(N, r, a);
     
     
     // Print number of particles to the trajectory file
@@ -275,13 +275,16 @@ int main()
     
     //  We want to calculate the average Temperature and Pressure for the simulation
     //  The variables need to be set to zero initially
-    Pavg = 0;
-    Tavg = 0;
+    double Pavg = 0;
+    double Tavg = 0;
     
     
-    int tenp = floor(NumTime/10);
+    int tenp = floor(NumTime/10.0); // maybe does not need floor?
     fprintf(ofp,"  time (s)              T(t) (K)              P(t) (Pa)           Kinetic En. (n.u.)     Potential En. (n.u.) Total En. (n.u.)\n");
     printf("  PERCENTAGE OF CALCULATION COMPLETE:\n  [");
+
+    int i;
+    double gc, Z;
     for (i=0; i<NumTime+1; i++) {
         
         //  This just prints updates on progress of the calculation for the users convenience
@@ -301,7 +304,7 @@ int main()
         // This updates the positions and velocities using Newton's Laws
         // Also computes the Pressure as the sum of momentum changes from wall collisions / timestep
         // which is a Kinetic Theory of gasses concept of Pressure
-        Press = VelocityVerlet(dt, i+1, tfp);
+        double Press = VelocityVerlet(N, L, dt, i+1, tfp, r, v, a);
         Press *= PressFac;
         
         //  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -309,12 +312,12 @@ int main()
         //  Instantaneous mean velocity squared, Temperature, Pressure
         //  Potential, and Kinetic Energy
         //  We would also like to use the IGL to try to see if we can extract the gas constant
-        mvs = MeanSquaredVelocity();
-        KE = Kinetic();
-        PE = Potential();
+        double mvs = MeanSquaredVelocity(N, v);
+        double KE = Kinetic(N, v);
+        double PE = Potential(N, r);
         
         // Temperature from Kinetic Theory
-        Temp = m*mvs/(3*kB) * TempFac;
+        double Temp = m*mvs/(3*kB) * TempFac;
         
         // Instantaneous gas constant and compressibility - not well defined because
         // pressure may be zero in some instances because there will be zero wall collisions,
@@ -362,12 +365,12 @@ int main()
 }
 
 
-void initialize() {
+void initialize(int N, double Tinit, double L, double r[restrict N][3], double v[restrict N][3]) {
     int n, p, i, j, k;
     double pos;
     
     // Number of atoms in each direction
-    n = int(ceil(pow(N, 1.0/3)));
+    n = (int)ceil(pow(N, 1.0/3));
     
     //  spacing between atoms along a given direction
     pos = L / n;
@@ -390,7 +393,7 @@ void initialize() {
     }
     
     // Call function to initialize velocities
-    initializeVelocities();
+    initializeVelocities(N, Tinit, v);
     
     /***********************************************
      *   Uncomment if you want to see what the initial positions and velocities are
@@ -411,7 +414,7 @@ void initialize() {
 
 
 //  Function to calculate the averaged velocity squared
-double MeanSquaredVelocity() { 
+double MeanSquaredVelocity(int N, double v[restrict N][3]) { 
     
     double vx2 = 0;
     double vy2 = 0;
@@ -433,7 +436,7 @@ double MeanSquaredVelocity() {
 }
 
 //  Function to calculate the kinetic energy of the system
-double Kinetic() { //Write Function here!  
+double Kinetic(int N, double v[restrict N][3]) { 
     
     double v2, kin;
     
@@ -457,7 +460,7 @@ double Kinetic() { //Write Function here!
 
 
 // Function to calculate the potential energy of the system
-double Potential() {
+double Potential(int N, double r[restrict N][3]) {
     double quot, r2, rnorm, term1, term2, Pot;
     int i, j, k;
     
@@ -489,17 +492,14 @@ double Potential() {
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom. 
-void computeAccelerations() {
+void computeAccelerations(int N, double r[restrict N][3], double a[restrict N][3]) {
     int i, j, k;
     double f, rSqd;
     double rij[3]; // position of i relative to j
     
-    
-    for (i = 0; i < N; i++) {  // set all accelerations to zero
-        for (k = 0; k < 3; k++) {
-            a[i][k] = 0;
-        }
-    }
+    // set all accelerations to zero
+    memset(a, 0, N*3*sizeof(double));
+
     for (i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         for (j = i+1; j < N; j++) {
             // initialize r^2 to zero
@@ -524,7 +524,7 @@ void computeAccelerations() {
 }
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
-double VelocityVerlet(double dt, int iter, FILE *fp) {
+double VelocityVerlet(int N, double L, double dt, int iter, FILE *fp, double r[restrict N][3], double v[restrict N][3], double a[restrict N][3]) {
     int i, j, k;
     
     double psum = 0.;
@@ -543,7 +543,7 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
         //printf("  %i  %6.4e   %6.4e   %6.4e\n",i,r[i][0],r[i][1],r[i][2]);
     }
     //  Update accellerations from updated positions
-    computeAccelerations();
+    computeAccelerations(N, r, a);
     //  Update velocity with updated acceleration
     for (i=0; i<N; i++) {
         for (j=0; j<3; j++) {
@@ -580,7 +580,7 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
 }
 
 
-void initializeVelocities() {
+void initializeVelocities(int N, double Tinit, double v[restrict N][3]) {
     
     int i, j;
     
@@ -651,8 +651,8 @@ double gaussdist() {
     double fac, rsq, v1, v2;
     if (!available) {
         do {
-            v1 = 2.0 * rand() / double(RAND_MAX) - 1.0;
-            v2 = 2.0 * rand() / double(RAND_MAX) - 1.0;
+            v1 = 2.0 * rand() / (double)(RAND_MAX) - 1.0;
+            v2 = 2.0 * rand() / (double)(RAND_MAX) - 1.0;
             rsq = v1 * v1 + v2 * v2;
         } while (rsq >= 1.0 || rsq == 0.0);
         
