@@ -6,7 +6,7 @@ CFLAGS = -O3 -g
 .DEFAULT_GOAL = MD.exe
 
 MD.exe: $(SRC)/MD.c
-	$(CC) $(CFLAGS) $(SRC)MD.c -lm -o MD.exe
+	$(CC) $(CFLAGS) $(SRC)MD.c-lm -o MD.exe
 
 MD_prof: $(SRC)/MD.c
 	$(CC) $(CFLAGS) $(SRC)MD.c -pg -lm -o $(PROF_DIR)MD.exe
@@ -20,3 +20,6 @@ clean:
 
 run:
 	./MD.exe < inputdata.txt
+	diff cp_average.txt original_average.txt
+	diff cp_output.txt original_output.txt
+	diff cp_traj.xyz original_traj.xyz
