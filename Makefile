@@ -20,9 +20,9 @@ clean:
 
 run:
 	./MD.exe < inputdata.txt
-	diff cp_average.txt original_average.txt
-	diff cp_output.txt original_output.txt
-	diff cp_traj.xyz original_traj.xyz
+	python compare.py cp_average.txt original_average.txt
+	python compare.py cp_output.txt original_output.txt
+	python compare.py cp_traj.xyz original_traj.xyz
 
 run_perf:
 	perf stat ./MD.exe < inputdata.txt

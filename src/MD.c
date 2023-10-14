@@ -64,6 +64,22 @@ double MeanSquaredVelocity(int N, double v[restrict N][3]);
 //  Compute total kinetic energy from particle mass and velocities
 double Kinetic(int N, double v[restrict N][3]);
 
+// Calculates power by dividing into multiplication of powers with exponents 1 or multiple of 2.
+// Powers are accumulated.
+// Ex: 4^7 = 4 * 4^2 * (4^2)^2 = 6 multiplications.
+// When inlined, loop is unrolled and branches are removed - tested in gcc 9.5.
+double pow_n(double num, unsigned int exp){
+    double ret=1, acc=num;
+    unsigned int expt=1;
+    while(expt<=exp){
+        if((expt & exp) == expt)
+            ret *= acc;
+        acc *= acc;
+        expt <<= 1;
+    }
+    return ret;
+}
+
 int main()
 {
     //  Files and filenames 
@@ -470,8 +486,8 @@ double Potential(int N, double r[restrict N][3]) {
                 for (int k=0; k<3; k++) {
                     r2 += (r[i][k]-r[j][k])*(r[i][k]-r[j][k]);
                 }
-                double term1 = sigma*sigma*sigma*sigma*sigma*sigma*sigma*sigma*sigma*sigma*sigma*sigma/(r2*r2*r2*r2*r2*r2);
-                double term2 = sigma*sigma*sigma*sigma*sigma*sigma/(r2*r2*r2);
+                double term1 = pow_n(sigma,12)/pow_n(r2,6);
+                double term2 = pow_n(sigma,6)/pow_n(r2,3);
                 
                 Pot += 4*epsilon*(term1 - term2);
                 
@@ -506,8 +522,9 @@ void computeAccelerations(int N, double r[restrict N][3], double a[restrict N][3
             }
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            double f = 24 * (2 * pow(rSqd, -7) - pow(rSqd, -4));
-            //double f = 24 * (2 * (1/(rSqd*rSqd*rSqd*rSqd*rSqd*rSqd*rSqd)) - (1/(rSqd*rSqd*rSqd*rSqd)));
+            // double f = 24 * (2 * pow(rSqd, -7) - pow(rSqd, -4));
+            // double f = 24 * (2 * (1/(rSqd*rSqd*rSqd*rSqd*rSqd*rSqd*rSqd)) - (1/(rSqd*rSqd*rSqd*rSqd)));
+            double f = 24 * (2 * pow_n(1/rSqd, 7) - pow_n(1/rSqd, 4));
             for (int k = 0; k < 3; k++) {
                 //  from F = ma, where m = 1 in natural units!
                 a[i][k] += rij[k] * f;
