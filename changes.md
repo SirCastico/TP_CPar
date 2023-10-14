@@ -12,7 +12,7 @@
 - contas simplificadas, removido sqrt e substituidos os pow
 
 ### Função computeAccelerations
-- movido update das velocidades para o loop que calcula a pressão
+- movido update das velocidades para o loop que calcula a pressão e substituidos os pow
 
 ### considerações
 
