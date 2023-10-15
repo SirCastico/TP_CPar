@@ -24,3 +24,6 @@
 
 ## change 4
 - movido fprintf da main loop para fora, resultados guardados num array (pouca diferença)
+
+### Função Potential
+- calculo de constantes sigma^12 e sigma^6 pré-calculado

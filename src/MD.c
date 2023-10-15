@@ -32,6 +32,8 @@
 
 //  Lennard-Jones parameters in natural units!
 const double sigma = 1.;
+const double sigma12 = sigma;
+const double sigma6 = sigma;
 const double epsilon = 1.;
 const double m = 1.;
 const double kB = 1.;
@@ -483,8 +485,6 @@ double Kinetic(int N, double v[restrict N][3]) {
 // Function to calculate the potential energy of the system
 double Potential(int N, double r[restrict N][3]) {
     double Pot=0.;
-    double sigma12 = pow_n(sigma, 12);
-    double sigma6 = pow_n(sigma, 6);
 
     for (int i=0; i<N; i++) {
         for (int j=0; j<N; j++) {
@@ -495,8 +495,9 @@ double Potential(int N, double r[restrict N][3]) {
                     double delta_r = r[i][k] - r[j][k];
                     r2 += delta_r * delta_r;
                 }
-                double term1 = sigma12/pow_n(r2,6);
-                double term2 = sigma6/pow_n(r2,3);
+                double r2p3 = pow_n(r2,3);
+                double term1 = sigma12/pow_n(r2p3,2);
+                double term2 = sigma6/r2p3;
                 
                 Pot += 4*epsilon*(term1 - term2);
                 
