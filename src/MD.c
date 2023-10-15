@@ -299,9 +299,21 @@ int main()
     fprintf(ofp,"  time (s)              T(t) (K)              P(t) (Pa)           Kinetic En. (n.u.)     Potential En. (n.u.) Total En. (n.u.)\n");
     printf("  PERCENTAGE OF CALCULATION COMPLETE:\n  [");
 
+    struct SimulationResult {
+        double time;
+        double temperature;
+        double pressure;
+        double kineticEnergy;
+        double potentialEnergy;
+        double totalEnergy;
+    };
+
     int i;
     double gc, Z;
-    for (i=0; i<NumTime+1; i++) {
+    struct SimulationResult results[NumTime]; // Max is 50000
+
+    i = 0;
+    for (; i <= NumTime; i++) {
         
         //  This just prints updates on progress of the calculation for the users convenience
         if (i==tenp) printf(" 10 |");
@@ -315,7 +327,6 @@ int main()
         else if (i==9*tenp) printf(" 90 |");
         else if (i==10*tenp) printf(" 100 ]\n");
         fflush(stdout);
-        
         
         // This updates the positions and velocities using Newton's Laws
         // Also computes the Pressure as the sum of momentum changes from wall collisions / timestep
@@ -344,11 +355,21 @@ int main()
         Tavg += Temp;
         Pavg += Press;
         
-        fprintf(ofp,"  %8.4e  %20.8f  %20.8f %20.8f  %20.8f  %20.8f \n",i*dt*timefac,Temp,Press,KE, PE, KE+PE);
-        
-        
+        // Store the results in the struct
+        results[i].time = i * dt * timefac;
+        results[i].temperature = Temp;
+        results[i].pressure = Press;
+        results[i].kineticEnergy = KE;
+        results[i].potentialEnergy = PE;
+        results[i].totalEnergy = KE + PE;
     }
-    
+
+    for (int j = 0; j <= NumTime; j++) {
+        fprintf(ofp, "  %8.4e  %20.8f  %20.8f %20.8f  %20.8f  %20.8f \n",
+        results[j].time, results[j].temperature, results[j].pressure,
+        results[j].kineticEnergy, results[j].potentialEnergy, results[j].totalEnergy);
+    }
+
     // Because we have calculated the instantaneous temperature and pressure,
     // we can take the average over the whole simulation here
     Pavg /= NumTime;
@@ -478,16 +499,20 @@ double Kinetic(int N, double v[restrict N][3]) {
 // Function to calculate the potential energy of the system
 double Potential(int N, double r[restrict N][3]) {
     double Pot=0.;
+    double sigma12 = pow_n(sigma, 12);
+    double sigma6 = pow_n(sigma, 6);
+
     for (int i=0; i<N; i++) {
         for (int j=0; j<N; j++) {
             
             if (j!=i) {
                 double r2=0.;
                 for (int k=0; k<3; k++) {
-                    r2 += (r[i][k]-r[j][k])*(r[i][k]-r[j][k]);
+                    double delta_r = r[i][k] - r[j][k];
+                    r2 += delta_r * delta_r;
                 }
-                double term1 = pow_n(sigma,12)/pow_n(r2,6);
-                double term2 = pow_n(sigma,6)/pow_n(r2,3);
+                double term1 = sigma12/pow_n(r2,6);
+                double term2 = sigma6/pow_n(r2,3);
                 
                 Pot += 4*epsilon*(term1 - term2);
                 
