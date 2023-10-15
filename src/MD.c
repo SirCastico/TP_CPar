@@ -54,17 +54,17 @@ void initialize(int N, double Tinit, double L, double r[restrict N][3], double v
 double VelocityVerlet(int N, double L, double dt, FILE *fp, double r[restrict N][3], double v[restrict N][3], double a[restrict N][3]);  
 //  Compute Force using F = -dV/dr
 //  solve F = ma for use in Velocity Verlet
-void computeAccelerations(int N, double r[restrict N][3], double a[restrict N][3]);
+void computeAccelerations(int N, const double r[restrict N][3], double a[restrict N][3]);
 //  Numerical Recipes function for generation gaussian distribution
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
 void initializeVelocities(int N, double Tinit, double v[restrict N][3]);
 //  Compute total potential energy from particle coordinates
-double Potential(int N, double r[restrict N][3]);
+double Potential(int N, const double r[restrict N][3]);
 //  Compute mean squared velocity from particle velocities
-double MeanSquaredVelocity(int N, double v[restrict N][3]);
+double MeanSquaredVelocity(int N, const double v[restrict N][3]);
 //  Compute total kinetic energy from particle mass and velocities
-double Kinetic(int N, double v[restrict N][3]);
+double Kinetic(int N, const double v[restrict N][3]);
 
 // Calculates power by dividing into multiplication of powers with exponents 1 or multiple of 2.
 // Powers are accumulated.
@@ -307,12 +307,10 @@ int main()
         double totalEnergy;
     };
 
-    int i;
     double gc, Z;
     struct SimulationResult results[NumTime]; // Max is 50000
 
-    i = 0;
-    for (; i <= NumTime; i++) {
+    for (int i=0; i <= NumTime; i++) {
 
         // This updates the positions and velocities using Newton's Laws
         // Also computes the Pressure as the sum of momentum changes from wall collisions / timestep
@@ -364,7 +362,7 @@ int main()
     gc = NA*Pavg*(Vol*VolFac)/(N*Tavg);
     fprintf(afp,"  Total Time (s)      T (K)               P (Pa)      PV/nT (J/(mol K))         Z           V (m^3)              N\n");
     fprintf(afp," --------------   -----------        ---------------   --------------   ---------------   ------------   -----------\n");
-    fprintf(afp,"  %8.4e  %15.5f       %15.5f     %10.5f       %10.5f        %10.5e         %i\n",i*dt*timefac,Tavg,Pavg,gc,Z,Vol*VolFac,N);
+    fprintf(afp,"  %8.4e  %15.5f       %15.5f     %10.5f       %10.5f        %10.5e         %i\n",(NumTime+1)*dt*timefac,Tavg,Pavg,gc,Z,Vol*VolFac,N);
     
     printf("\n  TO ANIMATE YOUR SIMULATION, OPEN THE FILE \n  '%s' WITH VMD AFTER THE SIMULATION COMPLETES\n",tfn);
     printf("\n  TO ANALYZE INSTANTANEOUS DATA ABOUT YOUR MOLECULE, OPEN THE FILE \n  '%s' WITH YOUR FAVORITE TEXT EDITOR OR IMPORT THE DATA INTO EXCEL\n",ofn);
@@ -437,7 +435,7 @@ void initialize(int N, double Tinit, double L, double r[restrict N][3], double v
 
 
 //  Function to calculate the averaged velocity squared
-double MeanSquaredVelocity(int N, double v[restrict N][3]) { 
+double MeanSquaredVelocity(int N, const double v[restrict N][3]) { 
     
     double vx2 = 0;
     double vy2 = 0;
@@ -459,7 +457,7 @@ double MeanSquaredVelocity(int N, double v[restrict N][3]) {
 }
 
 //  Function to calculate the kinetic energy of the system
-double Kinetic(int N, double v[restrict N][3]) { 
+double Kinetic(int N, const double v[restrict N][3]) { 
     
     double v2, kin;
     
@@ -483,7 +481,7 @@ double Kinetic(int N, double v[restrict N][3]) {
 
 
 // Function to calculate the potential energy of the system
-double Potential(int N, double r[restrict N][3]) {
+double Potential(int N, const double r[restrict N][3]) {
     double Pot=0.;
 
     for (int i=0; i<N; i++) {
@@ -496,7 +494,7 @@ double Potential(int N, double r[restrict N][3]) {
                     r2 += delta_r * delta_r;
                 }
                 double r2p3 = pow_n(r2,3);
-                double term1 = sigma12/pow_n(r2p3,2);
+                double term1 = sigma12/(r2p3*r2p3);
                 double term2 = sigma6/r2p3;
                 
                 Pot += 4*epsilon*(term1 - term2);
@@ -513,7 +511,7 @@ double Potential(int N, double r[restrict N][3]) {
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom. 
-void computeAccelerations(int N, double r[restrict N][3], double a[restrict N][3]) {
+void computeAccelerations(int N, const double r[restrict N][3], double a[restrict N][3]) {
 
     // set all accelerations to zero
     memset(a, 0, N*3*sizeof(double));
@@ -567,13 +565,14 @@ double VelocityVerlet(int N, double L, double dt, FILE *fp, double r[restrict N]
     // Elastic walls
     for (int i=0; i<N; i++) {
         for (int j=0; j<3; j++) {
+            // Note: gcc does not vectorize
             v[i][j] += 0.5*a[i][j]*dt; //  Update velocity with updated acceleration
 
             if (r[i][j]<0.) {
                 v[i][j] *=-1.; //- elastic walls
                 psum += 2*m*fabs(v[i][j])/dt;  // contribution to pressure from "left" walls
             }
-            if (r[i][j]>=L) {
+            else if (r[i][j]>=L) {
                 v[i][j]*=-1.;  //- elastic walls
                 psum += 2*m*fabs(v[i][j])/dt;  // contribution to pressure from "right" walls
             }
