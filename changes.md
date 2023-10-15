@@ -21,3 +21,6 @@
 
 #### mudança dos vetores posição, aceleração e velocidade para uma struct, operar num array dessa struct
 - Contra argumento: Potential e computeAccelerations acedem a um array de cada vez
+
+## change 4
+- movido fprintf da main loop para fora, resultados guardados num array (pouca diferença)

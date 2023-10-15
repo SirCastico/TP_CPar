@@ -1,7 +1,7 @@
 CC = gcc
 SRC = src/
 PROF_DIR = prof/
-CFLAGS = -O3 -g -Wall -mavx
+CFLAGS = -O3 -g -Wall -msse4
 
 .DEFAULT_GOAL = MD.exe
 

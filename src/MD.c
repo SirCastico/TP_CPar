@@ -84,7 +84,7 @@ int main()
 {
     //  Files and filenames 
     char prefix[1000], tfn[1000], ofn[1000], afn[1000];
-    FILE *infp, *tfp, *ofp, *afp;
+    FILE *tfp, *ofp, *afp;
     
     
     printf("\n  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
@@ -273,8 +273,6 @@ int main()
     double v[MAXPART][3];
     //  Acceleration
     double a[MAXPART][3];
-    //  Force
-    double F[MAXPART][3];
 
     //  Put all the atoms in simple crystal lattice and give them random velocities
     //  that corresponds to the initial temperature we have specified
@@ -295,9 +293,8 @@ int main()
     double Tavg = 0;
     
     
-    int tenp = floor(NumTime/10.0); // maybe does not need floor?
     fprintf(ofp,"  time (s)              T(t) (K)              P(t) (Pa)           Kinetic En. (n.u.)     Potential En. (n.u.) Total En. (n.u.)\n");
-    printf("  PERCENTAGE OF CALCULATION COMPLETE:\n  [");
+    printf("  SIMULATING...:\n\n");
 
     struct SimulationResult {
         double time;
@@ -314,20 +311,7 @@ int main()
 
     i = 0;
     for (; i <= NumTime; i++) {
-        
-        //  This just prints updates on progress of the calculation for the users convenience
-        if (i==tenp) printf(" 10 |");
-        else if (i==2*tenp) printf(" 20 |");
-        else if (i==3*tenp) printf(" 30 |");
-        else if (i==4*tenp) printf(" 40 |");
-        else if (i==5*tenp) printf(" 50 |");
-        else if (i==6*tenp) printf(" 60 |");
-        else if (i==7*tenp) printf(" 70 |");
-        else if (i==8*tenp) printf(" 80 |");
-        else if (i==9*tenp) printf(" 90 |");
-        else if (i==10*tenp) printf(" 100 ]\n");
-        fflush(stdout);
-        
+
         // This updates the positions and velocities using Newton's Laws
         // Also computes the Pressure as the sum of momentum changes from wall collisions / timestep
         // which is a Kinetic Theory of gasses concept of Pressure
