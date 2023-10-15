@@ -300,17 +300,17 @@ int main()
     printf("  PERCENTAGE OF CALCULATION COMPLETE:\n  [");
 
     struct SimulationResult {
-    double time;
-    double temperature;
-    double pressure;
-    double kineticEnergy;
-    double potentialEnergy;
-    double totalEnergy;
+        double time;
+        double temperature;
+        double pressure;
+        double kineticEnergy;
+        double potentialEnergy;
+        double totalEnergy;
     };
 
     int i;
     double gc, Z;
-    struct SimulationResult *results = malloc((NumTime + 1) * sizeof(struct SimulationResult));
+    struct SimulationResult results[NumTime]; // Max is 50000
 
     i = 0;
     for (; i <= NumTime; i++) {
@@ -367,11 +367,9 @@ int main()
     for (int j = 0; j <= NumTime; j++) {
         fprintf(ofp, "  %8.4e  %20.8f  %20.8f %20.8f  %20.8f  %20.8f \n",
         results[j].time, results[j].temperature, results[j].pressure,
-        results[j].kineticEnergy, results[j].potentialEnergy, results[j].totalEnergy, N);
+        results[j].kineticEnergy, results[j].potentialEnergy, results[j].totalEnergy);
     }
 
-    free(results);
-    
     // Because we have calculated the instantaneous temperature and pressure,
     // we can take the average over the whole simulation here
     Pavg /= NumTime;
