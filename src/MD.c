@@ -494,10 +494,8 @@ double Potential(int N, const double r[restrict N][3]) {
                     r2 += delta_r * delta_r;
                 }
                 double r2p3 = pow_n(r2,3);
-                double term1 = sigma12/(r2p3*r2p3);
-                double term2 = sigma6/r2p3;
                 
-                Pot += 4*epsilon*(term1 - term2);
+                Pot += 4*epsilon*(sigma12/r2p3 - sigma6)/r2p3;
                 
             }
         }
@@ -530,9 +528,8 @@ void computeAccelerations(int N, const double r[restrict N][3], double a[restric
             }
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            // double f = 24 * (2 * pow(rSqd, -7) - pow(rSqd, -4));
-            // double f = 24 * (2 * (1/(rSqd*rSqd*rSqd*rSqd*rSqd*rSqd*rSqd)) - (1/(rSqd*rSqd*rSqd*rSqd)));
-            double f = 24 * (2 * pow_n(1/rSqd, 7) - pow_n(1/rSqd, 4));
+            double f = (48 - 24*pow_n(rSqd, 3)) / pow_n(rSqd, 7);
+    
             for (int k = 0; k < 3; k++) {
                 //  from F = ma, where m = 1 in natural units!
                 a[i][k] += rij[k] * f;
@@ -553,9 +550,10 @@ double VelocityVerlet(int N, double L, double dt, FILE *fp, double r[restrict N]
     //printf("  Updated Positions!\n");
     for (int i=0; i<N; i++) {
         for (int j=0; j<3; j++) {
-            r[i][j] += v[i][j]*dt + 0.5*a[i][j]*dt*dt;
+            double at = 0.5*a[i][j]*dt;
+            r[i][j] += (v[i][j] + at)*dt;
             
-            v[i][j] += 0.5*a[i][j]*dt;
+            v[i][j] += at;
         }
         //printf("  %i  %6.4e   %6.4e   %6.4e\n",i,r[i][0],r[i][1],r[i][2]);
     }
@@ -565,16 +563,11 @@ double VelocityVerlet(int N, double L, double dt, FILE *fp, double r[restrict N]
     // Elastic walls
     for (int i=0; i<N; i++) {
         for (int j=0; j<3; j++) {
-            // Note: gcc does not vectorize
             v[i][j] += 0.5*a[i][j]*dt; //  Update velocity with updated acceleration
 
-            if (r[i][j]<0.) {
+            if (r[i][j]<0. || r[i][j]>=L) {
                 v[i][j] *=-1.; //- elastic walls
                 psum += 2*m*fabs(v[i][j])/dt;  // contribution to pressure from "left" walls
-            }
-            else if (r[i][j]>=L) {
-                v[i][j]*=-1.;  //- elastic walls
-                psum += 2*m*fabs(v[i][j])/dt;  // contribution to pressure from "right" walls
             }
         }
     }

@@ -1,7 +1,7 @@
 CC = gcc
 SRC = src/
 PROF_DIR = prof/
-CFLAGS = -O3 -g -Wall -msse4
+CFLAGS = -O3 -g -Wall -mavx
 
 .DEFAULT_GOAL = MD.exe
 
@@ -20,6 +20,8 @@ clean:
 
 run:
 	./MD.exe < inputdata.txt
+
+cmp:
 	python compare.py cp_average.txt original_average.txt
 	python compare.py cp_output.txt original_output.txt
 	python compare.py cp_traj.xyz original_traj.xyz
