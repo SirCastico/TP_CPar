@@ -17,11 +17,6 @@
 ### Função VelocityVerlet
 - movido update das velocidades para o loop que calcula a pressão
 
-### considerações
-
-#### mudança dos vetores posição, aceleração e velocidade para uma struct, operar num array dessa struct
-- Contra argumento: Potential e computeAccelerations acedem a um array de cada vez
-
 ## change 4
 - movido fprintf da main loop para fora, resultados guardados num array (pouca diferença)
 
@@ -46,3 +41,19 @@
 
 ### Função computeAccelerations
 - math ligeiramente simplificada
+
+## change 6
+
+                 0      context-switches:u               #    0.000 /sec                      
+                 0      cpu-migrations:u                 #    0.000 /sec                      
+               119      page-faults:u                    #   15.848 /sec                      
+    17,358,838,677      cycles:u                         #    2.312 GHz                         (83.34%)
+         2,671,750      stalled-cycles-frontend:u        #    0.02% frontend cycles idle        (83.34%)
+    14,800,237,409      stalled-cycles-backend:u         #   85.26% backend cycles idle         (83.34%)
+    23,000,123,012      instructions:u                   #    1.32  insn per cycle            
+                                                  #    0.64  stalled cycles per insn     (83.34%)
+       595,609,282      branches:u                       #   79.322 M/sec                       (83.33%)
+         1,245,894      branch-misses:u                  #    0.21% of all branches             (83.31%)
+
+### Função Potential
+- cortadas algumas iterações dos loops

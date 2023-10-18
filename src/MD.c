@@ -484,20 +484,16 @@ double Kinetic(int N, const double v[restrict N][3]) {
 double Potential(int N, const double r[restrict N][3]) {
     double Pot=0.;
 
-    for (int i=0; i<N; i++) {
-        for (int j=0; j<N; j++) {
-            
-            if (j!=i) {
-                double r2=0.;
-                for (int k=0; k<3; k++) {
-                    double delta_r = r[i][k] - r[j][k];
-                    r2 += delta_r * delta_r;
-                }
-                double r2p3 = pow_n(r2,3);
-                
-                Pot += 4*epsilon*(sigma12/r2p3 - sigma6)/r2p3;
-                
+    for (int i=0; i<N-1; i++) {
+        for (int j=i+1; j<N; j++) {
+            double r2=0.;
+            for (int k=0; k<3; k++) {
+                double delta_r = r[i][k] - r[j][k];
+                r2 += delta_r * delta_r;
             }
+            double r2p3 = pow_n(r2,3);
+            
+            Pot += 2*4*epsilon*(sigma12/r2p3 - sigma6)/r2p3;
         }
     }
     
