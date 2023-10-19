@@ -318,21 +318,12 @@ int main()
 
     for (int i=0; i <= NumTime; i++) {
 
-        // This updates the positions and velocities using Newton's Laws
-        // Also computes the Pressure as the sum of momentum changes from wall collisions / timestep
-        // which is a Kinetic Theory of gasses concept of Pressure
-        /*double Press = VelocityVerlet(N, L, dt, tfp, r, v, a);
-        Press *= PressFac;
         
-        //  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        //  Now we would like to calculate somethings about the system:
-        //  Instantaneous mean velocity squared, Temperature, Pressure
-        //  Potential, and Kinetic Energy
-        //  We would also like to use the IGL to try to see if we can extract the gas constant
-        double mvs = MeanSquaredVelocity(N, v);
-        double KE = Kinetic(N, v);
-        double PE = Potential(N, r);*/
-        
+
+        // This updates the positions and velocities using Newton's Laws.
+        // Computes the Pressure as the sum of momentum changes from wall collisions / timestep
+        // which is a Kinetic Theory of gasses concept of Pressure.
+        // Also computes Instantaneous mean velocity squared, Potential and Kinetic Energy.
         SimulationValues vals = simulate(N, L, dt, r, v, a);
         vals.pressure *= PressFac;
 
@@ -509,18 +500,6 @@ double Potential(int N, const double r[restrict N][3]) {
     return Pot;
 }
 
-void positionScalarProdutct(int N, const double r[restrict N][3], double r_sp[restrict N][3]){
-    for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        for (int j = i+1; j < N; j++) {
-            for (int k = 0; k < 3; k++) {
-                double sub = r[i][k] - r[j][k];
-                r_sp[i][k] += sub * sub;
-            }
-        }
-    }
-}
-
-
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom. 
@@ -662,6 +641,7 @@ SimulationValues simulate(int N, double L, double dt, double r[restrict N][3], d
             }
         }
     }
+
     double mvs = MeanSquaredVelocity(N, v);
     double ke = Kinetic(N, v);
 
