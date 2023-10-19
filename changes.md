@@ -57,3 +57,18 @@
 
 ### Função Potential
 - cortadas algumas iterações dos loops
+
+## change 7
+
+                 0      context-switches:u               #    0.000 /sec                      
+                 0      cpu-migrations:u                 #    0.000 /sec                      
+               117      page-faults:u                    #   18.041 /sec                      
+    14,985,958,482      cycles:u                         #    2.311 GHz                         (83.31%)
+         2,073,283      stalled-cycles-frontend:u        #    0.01% frontend cycles idle        (83.35%)
+    11,916,161,209      stalled-cycles-backend:u         #   79.52% backend cycles idle         (83.34%)
+    26,406,705,992      instructions:u                   #    1.76  insn per cycle            
+                                                  #    0.45  stalled cycles per insn     (83.34%)
+       476,264,105      branches:u                       #   73.438 M/sec                       (83.30%)
+           464,566      branch-misses:u                  #    0.10% of all branches             (83.35%)
+
+- Potential e computeAccelerations unidas

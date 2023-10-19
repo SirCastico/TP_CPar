@@ -45,6 +45,10 @@ const double kBSI = 1.38064852e-23;  // m^2*kg/(s^2*K)
 // Maximum particles
 const int MAXPART=5001;
 
+typedef struct SimulationValues{
+    double pressure, mvs, ke, pe;
+}SimulationValues;
+
 //  Function prototypes
 //  initialize positions on simple cubic lattice, also calls function to initialize velocities
 void initialize(int N, double Tinit, double L, double r[restrict N][3], double v[restrict N][3]);  
@@ -65,6 +69,7 @@ double Potential(int N, const double r[restrict N][3]);
 double MeanSquaredVelocity(int N, const double v[restrict N][3]);
 //  Compute total kinetic energy from particle mass and velocities
 double Kinetic(int N, const double v[restrict N][3]);
+SimulationValues simulate(int N, double L, double dt, double r[restrict N][3], double v[restrict N][3], double a[restrict N][3]);
 
 // Calculates power by dividing into multiplication of powers with exponents 1 or multiple of 2.
 // Powers are accumulated.
@@ -310,12 +315,13 @@ int main()
     double gc, Z;
     struct SimulationResult results[NumTime]; // Max is 50000
 
+
     for (int i=0; i <= NumTime; i++) {
 
         // This updates the positions and velocities using Newton's Laws
         // Also computes the Pressure as the sum of momentum changes from wall collisions / timestep
         // which is a Kinetic Theory of gasses concept of Pressure
-        double Press = VelocityVerlet(N, L, dt, tfp, r, v, a);
+        /*double Press = VelocityVerlet(N, L, dt, tfp, r, v, a);
         Press *= PressFac;
         
         //  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -325,27 +331,30 @@ int main()
         //  We would also like to use the IGL to try to see if we can extract the gas constant
         double mvs = MeanSquaredVelocity(N, v);
         double KE = Kinetic(N, v);
-        double PE = Potential(N, r);
+        double PE = Potential(N, r);*/
         
+        SimulationValues vals = simulate(N, L, dt, r, v, a);
+        vals.pressure *= PressFac;
+
         // Temperature from Kinetic Theory
-        double Temp = m*mvs/(3*kB) * TempFac;
+        double Temp = m*vals.mvs/(3*kB) * TempFac;
         
         // Instantaneous gas constant and compressibility - not well defined because
         // pressure may be zero in some instances because there will be zero wall collisions,
         // pressure may be very high in some instances because there will be a number of collisions
-        gc = NA*Press*(Vol*VolFac)/(N*Temp);
-        Z  = Press*(Vol*VolFac)/(N*kBSI*Temp);
+        gc = NA*vals.pressure*(Vol*VolFac)/(N*Temp);
+        Z  = vals.pressure*(Vol*VolFac)/(N*kBSI*Temp);
         
         Tavg += Temp;
-        Pavg += Press;
+        Pavg += vals.pressure;
         
         // Store the results in the struct
         results[i].time = i * dt * timefac;
         results[i].temperature = Temp;
-        results[i].pressure = Press;
-        results[i].kineticEnergy = KE;
-        results[i].potentialEnergy = PE;
-        results[i].totalEnergy = KE + PE;
+        results[i].pressure = vals.pressure;
+        results[i].kineticEnergy = vals.ke;
+        results[i].potentialEnergy = vals.pe;
+        results[i].totalEnergy = vals.ke + vals.pe;
     }
 
     for (int j = 0; j <= NumTime; j++) {
@@ -500,6 +509,16 @@ double Potential(int N, const double r[restrict N][3]) {
     return Pot;
 }
 
+void positionScalarProdutct(int N, const double r[restrict N][3], double r_sp[restrict N][3]){
+    for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
+        for (int j = i+1; j < N; j++) {
+            for (int k = 0; k < 3; k++) {
+                double sub = r[i][k] - r[j][k];
+                r_sp[i][k] += sub * sub;
+            }
+        }
+    }
+}
 
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
@@ -535,6 +554,7 @@ void computeAccelerations(int N, const double r[restrict N][3], double a[restric
     }
 }
 
+
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
 double VelocityVerlet(int N, double L, double dt, FILE *fp, double r[restrict N][3], double v[restrict N][3], double a[restrict N][3]) {
     double psum = 0.;
@@ -546,10 +566,8 @@ double VelocityVerlet(int N, double L, double dt, FILE *fp, double r[restrict N]
     //printf("  Updated Positions!\n");
     for (int i=0; i<N; i++) {
         for (int j=0; j<3; j++) {
-            double at = 0.5*a[i][j]*dt;
-            r[i][j] += (v[i][j] + at)*dt;
-            
-            v[i][j] += at;
+            v[i][j] += 0.5*a[i][j]*dt;
+            r[i][j] += v[i][j]*dt;
         }
         //printf("  %i  %6.4e   %6.4e   %6.4e\n",i,r[i][0],r[i][1],r[i][2]);
     }
@@ -580,6 +598,81 @@ double VelocityVerlet(int N, double L, double dt, FILE *fp, double r[restrict N]
     //fprintf(fp,"\n \n");
     
     return psum/(6*L*L);
+}
+
+//   Uses the derivative of the Lennard-Jones potential to calculate
+//   the forces on each atom.  Then uses a = F/m to calculate the
+//   accelleration of each atom. 
+double computeAccelerationsAndPotential(int N, const double r[restrict N][3], double a[restrict N][3]){
+    // set all accelerations to zero
+    memset(a, 0, N*3*sizeof(double));
+    double potential=0.;
+
+    for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
+        for (int j = i+1; j < N; j++) {
+            // initialize r^2 to zero
+            double rSqd = 0;
+            double rij[3]; // position of i relative to j
+            
+            for (int k = 0; k < 3; k++) {
+                //  component-by-componenent position of i relative to j
+                rij[k] = r[i][k] - r[j][k];
+                //  sum of squares of the components
+                rSqd += rij[k] * rij[k];
+            }
+
+            // Compute Potential
+            double r2p3 = pow_n(rSqd,3);
+            potential += 2*4*epsilon*(sigma12/r2p3 - sigma6)/r2p3;
+            
+            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
+            double f = (48 - 24*r2p3) / pow_n(rSqd, 7);
+    
+            for (int k = 0; k < 3; k++) {
+                //  from F = ma, where m = 1 in natural units!
+                a[i][k] += rij[k] * f;
+                a[j][k] -= rij[k] * f;
+            }
+        }
+    }
+    return potential;
+}
+
+SimulationValues simulate(int N, double L, double dt, double r[restrict N][3], double v[restrict N][3], double a[restrict N][3]) {
+    double psum = 0.;
+    
+    //  Update positions and velocity with current velocity and acceleration
+    for (int i=0; i<N; i++) {
+        for (int j=0; j<3; j++) {
+            v[i][j] += 0.5*a[i][j]*dt;
+            r[i][j] += v[i][j]*dt;
+        }
+    }
+    //  Update accellerations from updated positions and compute potential energy
+    double pe = computeAccelerationsAndPotential(N, r, a);
+    
+    // Elastic walls
+    for (int i=0; i<N; i++) {
+        for (int j=0; j<3; j++) {
+            v[i][j] += 0.5*a[i][j]*dt; //  Update velocity with updated acceleration
+
+            if (r[i][j]<0. || r[i][j]>=L) {
+                v[i][j] *=-1.; //- elastic walls
+                psum += 2*m*fabs(v[i][j])/dt;  // contribution to pressure from "left" walls
+            }
+        }
+    }
+    double mvs = MeanSquaredVelocity(N, v);
+    double ke = Kinetic(N, v);
+
+    SimulationValues values = {
+        .pressure = psum/(6*L*L),
+        .pe = pe,
+        .ke = ke,
+        .mvs = mvs,
+    };
+
+    return values;
 }
 
 

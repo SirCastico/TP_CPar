@@ -3,3 +3,4 @@ prof/*
 MD.exe
 MD.dump
 gmon.out
+callgrind.*
