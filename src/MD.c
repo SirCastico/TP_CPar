@@ -46,7 +46,7 @@ const double kBSI = 1.38064852e-23;  // m^2*kg/(s^2*K)
 const int MAXPART=5001;
 
 typedef struct SimulationValues{
-    double pressure, mvs, ke, pe;
+    double pressure, msv, ke, pe;
 }SimulationValues;
 
 //  Function prototypes
@@ -337,7 +337,7 @@ int main()
         vals.pressure *= PressFac;
 
         // Temperature from Kinetic Theory
-        double Temp = m*vals.mvs/(3*kB) * TempFac;
+        double Temp = m*vals.msv/(3*kB) * TempFac;
         
         // Instantaneous gas constant and compressibility - not well defined because
         // pressure may be zero in some instances because there will be zero wall collisions,
@@ -662,14 +662,24 @@ SimulationValues simulate(int N, double L, double dt, double r[restrict N][3], d
             }
         }
     }
-    double mvs = MeanSquaredVelocity(N, v);
-    double ke = Kinetic(N, v);
+    double msv_vec[3] = {0}, ke=0.0;
+
+    for (int i=0; i<N; i++) {
+        double v2=0.0;
+        for (int j=0; j<3; j++) {
+            double vsq = v[i][j]*v[i][j];
+            msv_vec[j] += vsq;
+            v2 += vsq;
+        }
+        ke += m*v2/2.0;
+    }
+    double msv = (msv_vec[0]+msv_vec[1]+msv_vec[2])/N;
 
     SimulationValues values = {
         .pressure = psum/(6*L*L),
         .pe = pe,
         .ke = ke,
-        .mvs = mvs,
+        .msv = msv,
     };
 
     return values;
