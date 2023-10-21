@@ -29,6 +29,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdalign.h>
+#include <immintrin.h>
 
 //  Lennard-Jones parameters in natural units!
 const double sigma = 1.;
@@ -589,16 +590,15 @@ double computeAccelerationsAndPotential(int N, const double r[restrict N][3], do
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         for (int j = i+1; j < N; j++) {
-            // initialize r^2 to zero
-            double rSqd = 0;
-            double rij[3]; // position of i relative to j
+            double rij[3]; // distance of i relative to j
             
-            for (int k = 0; k < 3; k++) {
-                //  component-by-componenent position of i relative to j
-                rij[k] = r[i][k] - r[j][k];
-                //  sum of squares of the components
-                rSqd += rij[k] * rij[k];
-            }
+            //  distance of i relative to j
+            rij[0] = r[i][0] - r[j][0];
+            rij[1] = r[i][1] - r[j][1];
+            rij[2] = r[i][2] - r[j][2];
+
+            //  dot product of distance
+            double rSqd = (rij[0] * rij[0])+(rij[1] * rij[1])+(rij[2] * rij[2]);
 
             // Compute Potential
             double r2p3 = pow_n(rSqd,3);
@@ -607,11 +607,14 @@ double computeAccelerationsAndPotential(int N, const double r[restrict N][3], do
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             double f = (48 - 24*r2p3) / pow_n(rSqd, 7);
     
-            for (int k = 0; k < 3; k++) {
-                //  from F = ma, where m = 1 in natural units!
-                a[i][k] += rij[k] * f;
-                a[j][k] -= rij[k] * f;
-            }
+            //  from F = ma, where m = 1 in natural units!
+            a[i][0] += rij[0] * f;
+            a[i][1] += rij[1] * f;
+            a[i][2] += rij[2] * f;
+
+            a[j][0] -= rij[0] * f;
+            a[j][1] -= rij[1] * f;
+            a[j][2] -= rij[2] * f;
         }
     }
     return potential;
