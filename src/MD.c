@@ -60,10 +60,8 @@ Vec4Double v4d_set(double a, double b, double c, double d){
     return _mm256_set_pd(a, b, c, d);
 }
 
-Vec4Double v4d_h_add(Vec4Double a){
-    a = _mm256_hadd_pd(a, a);
-    a = _mm256_hadd_pd(a, a);
-    return a;
+double v4d_h_add(Vec4Double a){
+    return a[0] + a[1] + a[2] + a[3];
 }
 
 Vec4Double v4d_load_u(double *a){
@@ -625,7 +623,7 @@ double computeAccelerationsAndPotential(int N, double r[][4], double a[][4]){
     double pot_last_iter = 0.0;
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        for (int j = i+1; j < N-((N-i)%4); j+=4) {
+        for (int j = i+1; j < N-((N-(i+1))%4); j+=4) {
             Vec4Double pos_i = v4d_load_u(r[i]);
             Vec4Double pos_j0 = v4d_load_u(r[j]);
             Vec4Double pos_j1 = v4d_load_u(r[j+1]);
@@ -633,27 +631,24 @@ double computeAccelerationsAndPotential(int N, double r[][4], double a[][4]){
             Vec4Double pos_j3 = v4d_load_u(r[j+3]);
             
             //  distance of i relative to j
-            Vec4Double rij0 = v4d_packed_sub(pos_i, pos_j0);
-            Vec4Double rij1 = v4d_packed_sub(pos_i, pos_j1);
-            Vec4Double rij2 = v4d_packed_sub(pos_i, pos_j2);
-            Vec4Double rij3 = v4d_packed_sub(pos_i, pos_j3);
+            Vec4Double rij0 = pos_i - pos_j0;
+            Vec4Double rij1 = pos_i - pos_j1;
+            Vec4Double rij2 = pos_i - pos_j2;
+            Vec4Double rij3 = pos_i - pos_j3;
 
             // dot product of distance
             Vec4Double dp;
             {
-                Vec4Double mult1 = v4d_packed_mul(rij0, rij0);
-                Vec4Double mult2 = v4d_packed_mul(rij1, rij1);
-                Vec4Double mult3 = v4d_packed_mul(rij2, rij2);
-                Vec4Double mult4 = v4d_packed_mul(rij3, rij3);
+                Vec4Double mult1 = rij0 * rij0;
+                Vec4Double mult2 = rij1 * rij1;
+                Vec4Double mult3 = rij2 * rij2;
+                Vec4Double mult4 = rij3 * rij3;
 
                 Vec4Double add1 = {mult1[0], mult2[0], mult3[0], mult4[0]};
                 Vec4Double add2 = {mult1[1], mult2[1], mult3[1], mult4[1]};
                 Vec4Double add3 = {mult1[2], mult2[2], mult3[2], mult4[2]};
-                Vec4Double add4 = {mult1[3], mult2[3], mult3[3], mult4[3]};
 
-                dp = v4d_packed_add(add1, add2);
-                dp = v4d_packed_add(dp, add3);
-                dp = v4d_packed_add(dp, add4);
+                dp = (add1 + add2) + add3;
             }
 
             // Compute Potential
@@ -662,12 +657,7 @@ double computeAccelerationsAndPotential(int N, double r[][4], double a[][4]){
                 Vec4Double eps_const = v4d_set_all(8*epsilon);
                 Vec4Double sigma12_v = v4d_set_all(sigma12), sigma6_v = v4d_set_all(sigma6);
 
-                Vec4Double pairs_potential = v4d_packed_div(sigma12_v, dp3);
-                pairs_potential = v4d_packed_sub(pairs_potential, sigma6_v);
-                pairs_potential = v4d_packed_mul(pairs_potential, eps_const);
-                pairs_potential = v4d_packed_div(pairs_potential, dp3);
-
-                potential = v4d_packed_add(potential, pairs_potential);
+                potential += eps_const*(sigma12_v/dp3 - sigma6_v)/dp3;
             }
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
@@ -705,11 +695,11 @@ double computeAccelerationsAndPotential(int N, double r[][4], double a[][4]){
 
             v4d_store_u(accel_i, a[i]);
             v4d_store_u(accel_j0, a[j]);
-            v4d_store_u(accel_j1, a[j]);
-            v4d_store_u(accel_j2, a[j]);
-            v4d_store_u(accel_j3, a[j]);
+            v4d_store_u(accel_j1, a[j+1]);
+            v4d_store_u(accel_j2, a[j+2]);
+            v4d_store_u(accel_j3, a[j+3]);
         }
-        for (int j = N-(N-i)%4; j < N; j++) {
+        for (int j = N-(N-(i+1))%4; j < N; j++) {
             double rij[3]; // distance of i relative to j
             
             //  distance of i relative to j
@@ -742,7 +732,7 @@ double computeAccelerationsAndPotential(int N, double r[][4], double a[][4]){
         }
     }
 
-    return v4d_h_add(potential)[0]+pot_last_iter;
+    return potential[0]+potential[1]+potential[2]+potential[3]+pot_last_iter;
 }
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
@@ -750,7 +740,7 @@ double computeAccelerationsAndPotential(int N, double r[][4], double a[][4]){
 //   accelleration of each atom. 
 double computeAccelerationsAndPotential2(int N, const double r[][4], double a[][4]){
     // set all accelerations to zero
-    memset(a, 0, N*3*sizeof(double));
+    memset(a, 0, N*4*sizeof(double));
     double potential=0.;
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
@@ -785,6 +775,8 @@ double computeAccelerationsAndPotential2(int N, const double r[][4], double a[][
             a[j][1] -= rij[1];
             a[j][2] -= rij[2];
         }
+            printf("%f\n", potential);
+            if(i==1) exit(0);
     }
     return potential;
 }
