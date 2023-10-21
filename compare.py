@@ -32,7 +32,8 @@ def compare_files(f1: TextIOWrapper, f2: TextIOWrapper):
             if(num_len != len(l2_arr[arr_ind])):
                 print(f"different number length in line {line_num}")
 
-            check_len = 12 if num_len>12 else num_len
+            min_len = min(num_len, len(l2_arr[arr_ind]))
+            check_len = 12 if min_len>12 else min_len
 
             for num_ind in range(check_len):
                 if(l1_arr[arr_ind][num_ind]!=l2_arr[arr_ind][num_ind]):
