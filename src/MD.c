@@ -589,13 +589,15 @@ double computeAccelerationsAndPotential(int N, const double r[restrict N][3], do
     double potential=0.;
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
+        double pos_i[3] = {r[i][0], r[i][1], r[i][2]};
+        double accel_i[3] = {a[i][0], a[i][1], a[i][2]};
         for (int j = i+1; j < N; j++) {
             double rij[3]; // distance of i relative to j
             
             //  distance of i relative to j
-            rij[0] = r[i][0] - r[j][0];
-            rij[1] = r[i][1] - r[j][1];
-            rij[2] = r[i][2] - r[j][2];
+            rij[0] = pos_i[0] - r[j][0];
+            rij[1] = pos_i[1] - r[j][1];
+            rij[2] = pos_i[2] - r[j][2];
 
             //  dot product of distance
             double rSqd = (rij[0] * rij[0])+(rij[1] * rij[1])+(rij[2] * rij[2]);
@@ -608,14 +610,17 @@ double computeAccelerationsAndPotential(int N, const double r[restrict N][3], do
             double f = (48 - 24*r2p3) / pow_n(rSqd, 7);
     
             //  from F = ma, where m = 1 in natural units!
-            a[i][0] += rij[0] * f;
-            a[i][1] += rij[1] * f;
-            a[i][2] += rij[2] * f;
+            accel_i[0] += rij[0] * f;
+            accel_i[1] += rij[1] * f;
+            accel_i[2] += rij[2] * f;
 
             a[j][0] -= rij[0] * f;
             a[j][1] -= rij[1] * f;
             a[j][2] -= rij[2] * f;
         }
+        a[i][0] = accel_i[0];
+        a[i][1] = accel_i[1];
+        a[i][2] = accel_i[2];
     }
     return potential;
 }
