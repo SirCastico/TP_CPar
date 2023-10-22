@@ -27,4 +27,4 @@ cmp:
 	python compare.py cp_traj.xyz original_traj.xyz
 
 run_perf:
-	perf stat ./MD.exe < inputdata.txt
+	perf stat -d ./MD.exe < inputdata.txt

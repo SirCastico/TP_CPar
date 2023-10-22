@@ -50,41 +50,41 @@ typedef struct SimulationValues{
     double pressure, mvs, ke, pe;
 }SimulationValues;
 
-typedef __m256d Vec4Double;
+typedef __m256d v4df;
 
-Vec4Double v4d_set_all(double v){
+v4df v4d_set_all(double v){
     return _mm256_set1_pd(v);
 }
 
-Vec4Double v4d_set(double a, double b, double c, double d){
+v4df v4d_set(double a, double b, double c, double d){
     return _mm256_set_pd(a, b, c, d);
 }
 
-double v4d_h_add(Vec4Double a){
+double v4d_h_add(v4df a){
     return a[0] + a[1] + a[2] + a[3];
 }
 
-Vec4Double v4d_load_u(double *a){
+v4df v4d_load_u(double *a){
     return _mm256_loadu_pd(a);
 }
 
-Vec4Double v4d_packed_add(Vec4Double a, Vec4Double b){
+v4df v4d_packed_add(v4df a, v4df b){
     return _mm256_add_pd(a, b);
 }
 
-Vec4Double v4d_packed_sub(Vec4Double a, Vec4Double b){
+v4df v4d_packed_sub(v4df a, v4df b){
     return _mm256_sub_pd(a, b);
 }
 
-Vec4Double v4d_packed_mul(Vec4Double a, Vec4Double b){
+v4df v4d_packed_mul(v4df a, v4df b){
     return _mm256_mul_pd(a, b);
 }
 
-Vec4Double v4d_packed_div(Vec4Double a, Vec4Double b){
+v4df v4d_packed_div(v4df a, v4df b){
     return _mm256_div_pd(a, b);
 }
 
-void v4d_store_u(Vec4Double a, double b[4]){
+void v4d_store_u(v4df a, double b[4]){
     _mm256_storeu_pd(b, a);
 }
 
@@ -126,8 +126,8 @@ double pow_n(double num, unsigned int exp){
     return ret;
 }
 
-Vec4Double v4d_pow_n(Vec4Double num, unsigned int exp){
-    Vec4Double ret=v4d_set_all(1), acc=num;
+v4df v4d_pow_n(v4df num, unsigned int exp){
+    v4df ret=v4d_set_all(1), acc=num;
     unsigned int expt=1;
     while(expt<=exp){
         if((expt & exp) == expt)
@@ -619,56 +619,58 @@ double VelocityVerlet(int N, double L, double dt, FILE *fp, double r[][4], doubl
 double computeAccelerationsAndPotential(int N, double r[][4], double a[][4]){
     // set all accelerations to zero
     memset(a, 0, N*4*sizeof(double));
-    Vec4Double potential = v4d_set_all(0.0);
+    v4df potential = v4d_set_all(0.0);
     double pot_last_iter = 0.0;
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
+        v4df pos_i = v4d_load_u(r[i]);
+        v4df accel_i = v4d_load_u(a[i]);
         for (int j = i+1; j < N-((N-(i+1))%4); j+=4) {
-            Vec4Double pos_i = v4d_load_u(r[i]);
-            Vec4Double pos_j0 = v4d_load_u(r[j]);
-            Vec4Double pos_j1 = v4d_load_u(r[j+1]);
-            Vec4Double pos_j2 = v4d_load_u(r[j+2]);
-            Vec4Double pos_j3 = v4d_load_u(r[j+3]);
+            v4df pos_j0 = v4d_load_u(r[j]);
+            v4df pos_j1 = v4d_load_u(r[j+1]);
+            v4df pos_j2 = v4d_load_u(r[j+2]);
+            v4df pos_j3 = v4d_load_u(r[j+3]);
             
             //  distance of i relative to j
-            Vec4Double rij0 = pos_i - pos_j0;
-            Vec4Double rij1 = pos_i - pos_j1;
-            Vec4Double rij2 = pos_i - pos_j2;
-            Vec4Double rij3 = pos_i - pos_j3;
+            v4df rij0 = pos_i - pos_j0;
+            v4df rij1 = pos_i - pos_j1;
+            v4df rij2 = pos_i - pos_j2;
+            v4df rij3 = pos_i - pos_j3;
 
             // dot product of distance
-            Vec4Double dp;
+            v4df dp;
             {
-                Vec4Double mult1 = rij0 * rij0;
-                Vec4Double mult2 = rij1 * rij1;
-                Vec4Double mult3 = rij2 * rij2;
-                Vec4Double mult4 = rij3 * rij3;
+                v4df mult1 = rij0 * rij0;
+                v4df mult2 = rij1 * rij1;
+                v4df mult3 = rij2 * rij2;
+                v4df mult4 = rij3 * rij3;
 
-                Vec4Double add1 = {mult1[0], mult2[0], mult3[0], mult4[0]};
-                Vec4Double add2 = {mult1[1], mult2[1], mult3[1], mult4[1]};
-                Vec4Double add3 = {mult1[2], mult2[2], mult3[2], mult4[2]};
+                v4df add1 = {mult1[0], mult2[0], mult3[0], mult4[0]};
+                v4df add2 = {mult1[1], mult2[1], mult3[1], mult4[1]};
+                v4df add3 = {mult1[2], mult2[2], mult3[2], mult4[2]};
 
                 dp = (add1 + add2) + add3;
             }
 
             // Compute Potential
-            Vec4Double dp3 = v4d_pow_n(dp, 3);
+            v4df dp3 = v4d_pow_n(dp, 3);
             {
-                Vec4Double eps_const = v4d_set_all(8*epsilon);
-                Vec4Double sigma12_v = v4d_set_all(sigma12), sigma6_v = v4d_set_all(sigma6);
+                v4df dp3_div = 1/dp3;
+                v4df eps_const = v4d_set_all(8*epsilon);
+                v4df sigma12_v = v4d_set_all(sigma12), sigma6_v = v4d_set_all(sigma6);
 
-                potential += eps_const*(sigma12_v/dp3 - sigma6_v)/dp3;
+                potential += eps_const*(sigma12_v*dp3_div - sigma6_v)*dp3_div;
             }
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            Vec4Double dp7 = v4d_pow_n(dp, 7);
-            Vec4Double vec_48 = v4d_set_all(48.0), vec_24 = v4d_set_all(24.0);
+            v4df dp7 = v4d_pow_n(dp, 7);
+            v4df vec_48 = v4d_set_all(48.0), vec_24 = v4d_set_all(24.0);
 
-            Vec4Double forces = v4d_packed_mul(vec_24, dp3);
+            v4df forces = v4d_packed_mul(vec_24, dp3);
             forces = v4d_packed_sub(vec_48, forces);
             forces = v4d_packed_div(forces, dp7);
 
-            Vec4Double f0=v4d_set_all(forces[0]),f1=v4d_set_all(forces[1]),
+            v4df f0=v4d_set_all(forces[0]),f1=v4d_set_all(forces[1]),
                         f2=v4d_set_all(forces[2]),f3=v4d_set_all(forces[3]);
 
             rij0 = v4d_packed_mul(rij0, f0);
@@ -677,28 +679,27 @@ double computeAccelerationsAndPotential(int N, double r[][4], double a[][4]){
             rij3 = v4d_packed_mul(rij3, f3);
 
             //  from F = ma, where m = 1 in natural units!
-            Vec4Double accel_i = v4d_load_u(a[i]);
-            Vec4Double accel_j0 = v4d_load_u(a[j]);
-            Vec4Double accel_j1 = v4d_load_u(a[j+1]);
-            Vec4Double accel_j2 = v4d_load_u(a[j+2]);
-            Vec4Double accel_j3 = v4d_load_u(a[j+3]);
+            v4df accel_j0 = v4d_load_u(a[j]);
+            v4df accel_j1 = v4d_load_u(a[j+1]);
+            v4df accel_j2 = v4d_load_u(a[j+2]);
+            v4df accel_j3 = v4d_load_u(a[j+3]);
 
-            accel_i = v4d_packed_add(accel_i, rij0);
-            accel_i = v4d_packed_add(accel_i, rij1);
-            accel_i = v4d_packed_add(accel_i, rij2);
-            accel_i = v4d_packed_add(accel_i, rij3);
+            v4df add1 = v4d_packed_add(rij0, rij1);
+            v4df add2 = v4d_packed_add(rij2, rij3);
+            accel_i = v4d_packed_add(accel_i,add1);
+            accel_i = v4d_packed_add(accel_i,add2);
 
             accel_j0 = v4d_packed_sub(accel_j0, rij0);
             accel_j1 = v4d_packed_sub(accel_j1, rij1);
             accel_j2 = v4d_packed_sub(accel_j2, rij2);
             accel_j3 = v4d_packed_sub(accel_j3, rij3);
 
-            v4d_store_u(accel_i, a[i]);
             v4d_store_u(accel_j0, a[j]);
             v4d_store_u(accel_j1, a[j+1]);
             v4d_store_u(accel_j2, a[j+2]);
             v4d_store_u(accel_j3, a[j+3]);
         }
+        v4d_store_u(accel_i, a[i]);
         for (int j = N-(N-(i+1))%4; j < N; j++) {
             double rij[3]; // distance of i relative to j
             
