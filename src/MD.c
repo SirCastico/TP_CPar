@@ -31,6 +31,7 @@
 #include <stdalign.h>
 #include <immintrin.h>
 
+
 //  Lennard-Jones parameters in natural units!
 const double sigma = 1.;
 const double sigma12 = sigma;
@@ -50,43 +51,62 @@ typedef struct SimulationValues{
     double pressure, mvs, ke, pe;
 }SimulationValues;
 
-typedef __m256d v4df;
-
-v4df v4d_set_all(double v){
-    return _mm256_set1_pd(v);
-}
+// vector types
+typedef double __attribute__((vector_size(32), aligned(32))) v4df;
+typedef double __attribute__((vector_size(32), aligned(1))) __v4df_u; // internal unaligned type
 
 v4df v4d_set(double a, double b, double c, double d){
-    return _mm256_set_pd(a, b, c, d);
+    return (v4df){d,c,b,a};
+}
+
+v4df v4d_set_all(double v){
+    return v4d_set(v,v,v,v);
 }
 
 double v4d_h_add(v4df a){
     return a[0] + a[1] + a[2] + a[3];
 }
 
+v4df v4d_load(double *a){
+    return *(v4df*)a;
+}
+
+void v4d_store(v4df a, double *p){
+  *(v4df *)p = a;
+}
+
 v4df v4d_load_u(double *a){
-    return _mm256_loadu_pd(a);
-}
-
-v4df v4d_packed_add(v4df a, v4df b){
-    return _mm256_add_pd(a, b);
-}
-
-v4df v4d_packed_sub(v4df a, v4df b){
-    return _mm256_sub_pd(a, b);
-}
-
-v4df v4d_packed_mul(v4df a, v4df b){
-    return _mm256_mul_pd(a, b);
-}
-
-v4df v4d_packed_div(v4df a, v4df b){
-    return _mm256_div_pd(a, b);
+    // from clang implementation of unaligned load (compatible with gcc)
+    struct __loadu_pd {
+    __v4df_u __v;
+    } __attribute__((__packed__, __may_alias__));
+    return ((const struct __loadu_pd*)a)->__v;
 }
 
 void v4d_store_u(v4df a, double b[4]){
-    _mm256_storeu_pd(b, a);
+    // form clang implementation of unaligned store (compatible with gcc)
+    struct __storeu_pd {
+    __v4df_u __v;
+    } __attribute__((__packed__, __may_alias__));
+    ((struct __storeu_pd*)b)->__v = a;
 }
+
+//v4df v4d_packed_add(v4df a, v4df b){
+//    return _mm256_add_pd(a, b);
+//}
+//
+//v4df v4d_packed_sub(v4df a, v4df b){
+//    return _mm256_sub_pd(a, b);
+//}
+//
+//v4df v4d_packed_mul(v4df a, v4df b){
+//    return _mm256_mul_pd(a, b);
+//}
+//
+//v4df v4d_packed_div(v4df a, v4df b){
+//    return _mm256_div_pd(a, b);
+//}
+
 
 //  Function prototypes
 //  initialize positions on simple cubic lattice, also calls function to initialize velocities
@@ -131,11 +151,15 @@ v4df v4d_pow_n(v4df num, unsigned int exp){
     unsigned int expt=1;
     while(expt<=exp){
         if((expt & exp) == expt)
-            ret = v4d_packed_mul(ret, acc);
-        acc = v4d_packed_mul(acc, acc);
+            ret = ret * acc;
+        acc = acc * acc;
         expt <<= 1;
     }
     return ret;
+}
+
+double dot_product(double d[3]){
+    return d[0]*d[0] + d[1]*d[1] + d[2]*d[2];
 }
 
 int main()
@@ -326,11 +350,11 @@ int main()
     }
     
     //  Position
-    double r[3][MAXPART];
+    alignas(32) double r[3][MAXPART];
     //  Velocity
-    double v[3][MAXPART];
+    alignas(32) double v[3][MAXPART];
     //  Acceleration
-    double a[3][MAXPART];
+    alignas(32) double a[3][MAXPART];
 
     //  Put all the atoms in simple crystal lattice and give them random velocities
     //  that corresponds to the initial temperature we have specified
@@ -364,8 +388,8 @@ int main()
     };
 
     double gc, Z;
-    struct SimulationResult results[NumTime]; // Max is 50000
 
+    struct SimulationResult results[NumTime]; // Max is 50000
 
     for (int i=0; i <= NumTime; i++) {
 
@@ -513,10 +537,10 @@ double Kinetic(int N, const double v[3][MAXPART]) {
     double v2, kin;
     
     kin =0.;
-    for (int i=0; i<N; i++) {
+    for (int j=0; j<3; j++) {
         
         v2 = 0.;
-        for (int j=0; j<3; j++) {
+        for (int i=0; i<N; i++) {
             
             v2 += v[j][i]*v[j][i];
             
@@ -537,29 +561,36 @@ double Kinetic(int N, const double v[3][MAXPART]) {
 void computeAccelerations(int N, const double r[3][MAXPART], double a[3][MAXPART]) {
 
     // set all accelerations to zero
-    memset(a, 0, N*3*sizeof(double));
+    memset(a, 0, MAXPART*3*sizeof(double));
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         for (int j = i+1; j < N; j++) {
             // initialize r^2 to zero
-            double rSqd = 0;
             double rij[3]; // position of i relative to j
+
+            //  distance of i relative to j
+            rij[0] = r[0][i] - r[0][j];
+            rij[1] = r[1][i] - r[1][j];
+            rij[2] = r[2][i] - r[2][j];
             
-            for (int k = 0; k < 3; k++) {
-                //  component-by-componenent position of i relative to j
-                rij[k] = r[k][i] - r[k][j];
-                //  sum of squares of the components
-                rSqd += rij[k] * rij[k];
-            }
-            
+            double rSqd = (rij[0] * rij[0])+(rij[1] * rij[1])+(rij[2] * rij[2]);
+
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             double f = (48 - 24*pow_n(rSqd, 3)) / pow_n(rSqd, 7);
+
+            rij[0] *= f; 
+            rij[1] *= f; 
+            rij[2] *= f; 
+
+            //  from F = ma, where m = 1 in natural units!
+            a[0][i] += rij[0];
+            a[1][i] += rij[1];
+            a[2][i] += rij[2];
+
+            a[0][j] -= rij[0];
+            a[1][j] -= rij[1];
+            a[2][j] -= rij[2];
     
-            for (int k = 0; k < 3; k++) {
-                //  from F = ma, where m = 1 in natural units!
-                a[k][i] += rij[k] * f;
-                a[k][j] -= rij[k] * f;
-            }
         }
     }
 }
@@ -572,9 +603,12 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
     v4df potential = v4d_set_all(0.0);
     double pot_last_iter = 0.0;
 
+    v4df eps_const = v4d_set_all(8*epsilon);
+    v4df sigma12_v = v4d_set_all(sigma12), sigma6_v = v4d_set_all(sigma6);
+
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j [1,2,3,4,5,6]
-        double pos_i[4] = {r[0][i], r[1][i], r[2][i]};
-        double accel_i[4] = {a[0][i], a[1][i], a[2][i]};
+        double pos_i[3] = {r[0][i], r[1][i], r[2][i]};
+        double accel_i[3] = {a[0][i], a[1][i], a[2][i]};
         for (int j = i+1; j < N-((N-(i+1))%4); j+=4) {
             v4df pos_jx = v4d_load_u(&r[0][j]);
             v4df pos_jy = v4d_load_u(&r[1][j]);
@@ -586,19 +620,12 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
             v4df dist_z = {pos_i[2]-pos_jz[0], pos_i[2]-pos_jz[1], pos_i[2]-pos_jz[2], pos_i[2]-pos_jz[3]};
 
             // dot product of distance
-            v4df dp;
-            {
-                dp = dist_x * dist_x;
-                dp += dist_y * dist_y;
-                dp += dist_z * dist_z;
-            }
+            v4df dp = dist_x * dist_x + dist_y * dist_y + dist_z * dist_z;
 
             // Compute Potential
             v4df dp3 = v4d_pow_n(dp, 3);
             {
                 v4df dp3_div = 1/dp3;
-                v4df eps_const = v4d_set_all(8*epsilon);
-                v4df sigma12_v = v4d_set_all(sigma12), sigma6_v = v4d_set_all(sigma6);
 
                 potential += eps_const*(sigma12_v*dp3_div - sigma6_v)*dp3_div;
             }
@@ -607,9 +634,7 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
             v4df dp7 = v4d_pow_n(dp, 7);
             v4df vec_48 = v4d_set_all(48.0), vec_24 = v4d_set_all(24.0);
 
-            v4df forces = v4d_packed_mul(vec_24, dp3);
-            forces = v4d_packed_sub(vec_48, forces);
-            forces = v4d_packed_div(forces, dp7);
+            v4df forces = (vec_48 - vec_24 * dp3)/dp7;
 
             dist_x *= forces;
             dist_y *= forces;
@@ -624,24 +649,21 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
             accel_i[1] += v4d_h_add(dist_y);
             accel_i[2] += v4d_h_add(dist_z);
 
-            accel_jx = v4d_packed_sub(accel_jx, dist_x);
-            accel_jy = v4d_packed_sub(accel_jy, dist_y);
-            accel_jz = v4d_packed_sub(accel_jz, dist_z);
+            accel_jx = accel_jx - dist_x;
+            accel_jy = accel_jy - dist_y;
+            accel_jz = accel_jz - dist_z;
 
             v4d_store_u(accel_jx, &a[0][j]);
             v4d_store_u(accel_jy, &a[1][j]);
             v4d_store_u(accel_jz, &a[2][j]);
         }
-        a[0][i] = accel_i[0];
-        a[1][i] = accel_i[1];
-        a[2][i] = accel_i[2];
         for (int j = N-(N-(i+1))%4; j < N; j++) {
             double rij[3]; // distance of i relative to j
             
             //  distance of i relative to j
-            rij[0] = r[0][i] - r[0][j];
-            rij[1] = r[1][i] - r[1][j];
-            rij[2] = r[2][i] - r[2][j];
+            rij[0] = pos_i[0] - r[0][j];
+            rij[1] = pos_i[1] - r[1][j];
+            rij[2] = pos_i[2] - r[2][j];
 
             //  dot product of distance
             double rSqd = (rij[0] * rij[0])+(rij[1] * rij[1])+(rij[2] * rij[2]);
@@ -658,18 +680,22 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
             rij[2] *= f; 
 
             //  from F = ma, where m = 1 in natural units!
-            a[0][i] += rij[0];
-            a[1][i] += rij[1];
-            a[2][i] += rij[2];
+            accel_i[0] += rij[0];
+            accel_i[1] += rij[1];
+            accel_i[2] += rij[2];
 
             a[0][j] -= rij[0];
             a[1][j] -= rij[1];
             a[2][j] -= rij[2];
         }
+        a[0][i] = accel_i[0];
+        a[1][i] = accel_i[1];
+        a[2][i] = accel_i[2];
     }
 
     return potential[0]+potential[1]+potential[2]+potential[3]+pot_last_iter;
 }
+
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
@@ -680,13 +706,103 @@ double computeAccelerationsAndPotential2(int N, const double r[3][MAXPART], doub
     double potential=0.;
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        for (int j = i+1; j < N; j++) {
+        double pos_i[3] = {r[0][i], r[1][i], r[2][i]};
+        double accel_i[3] = {a[0][i], a[1][i], a[2][i]};
+        for (int j = i+1; j < N-((N-(i+1))%4); j+=4) {
+            
+            //  distance of i relative to j
+            double rij0[3] = {
+                pos_i[0] - r[0][j],
+                pos_i[1] - r[1][j],
+                pos_i[2] - r[2][j],
+            };
+
+            double rij1[3] = {
+                pos_i[0] - r[0][j+1],
+                pos_i[1] - r[1][j+1],
+                pos_i[2] - r[2][j+1],
+            };
+
+            double rij2[3] = {
+                pos_i[0] - r[0][j+2],
+                pos_i[1] - r[1][j+2],
+                pos_i[2] - r[2][j+2],
+            };
+
+            double rij3[3] = {
+                pos_i[0] - r[0][j+3],
+                pos_i[1] - r[1][j+3],
+                pos_i[2] - r[2][j+3],
+            };
+
+            //  dot product of distance
+            double rSqd0 = dot_product(rij0);
+            double rSqd1 = dot_product(rij1);
+            double rSqd2 = dot_product(rij2);
+            double rSqd3 = dot_product(rij3);
+
+
+            // Compute Potential
+            double r2p3_0 = pow_n(rSqd0,3);
+            double r2p3_1 = pow_n(rSqd1,3);
+            double r2p3_2 = pow_n(rSqd2,3);
+            double r2p3_3 = pow_n(rSqd3,3);
+
+            potential += 2*4*epsilon*(sigma12/r2p3_0 - sigma6)/r2p3_0;
+            potential += 2*4*epsilon*(sigma12/r2p3_1 - sigma6)/r2p3_1;
+            potential += 2*4*epsilon*(sigma12/r2p3_2 - sigma6)/r2p3_2;
+            potential += 2*4*epsilon*(sigma12/r2p3_3 - sigma6)/r2p3_3;
+            
+            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
+            double f0 = (48 - 24*r2p3_0) / pow_n(rSqd0, 7);
+            double f1 = (48 - 24*r2p3_1) / pow_n(rSqd1, 7);
+            double f2 = (48 - 24*r2p3_2) / pow_n(rSqd2, 7);
+            double f3 = (48 - 24*r2p3_3) / pow_n(rSqd3, 7);
+
+            rij0[0] *= f0; 
+            rij0[1] *= f0; 
+            rij0[2] *= f0; 
+
+            rij1[0] *= f1; 
+            rij1[1] *= f1; 
+            rij1[2] *= f1; 
+
+            rij2[0] *= f2; 
+            rij2[1] *= f2; 
+            rij2[2] *= f2; 
+
+            rij3[0] *= f3; 
+            rij3[1] *= f3; 
+            rij3[2] *= f3; 
+
+            //  from F = ma, where m = 1 in natural units!
+            accel_i[0] += rij0[0] + rij1[0] + rij2[0] + rij3[0];
+            accel_i[1] += rij0[1] + rij1[1] + rij2[1] + rij3[1];
+            accel_i[2] += rij0[2] + rij1[2] + rij2[2] + rij3[2];
+
+            a[0][j] -= rij0[0];
+            a[1][j] -= rij0[1];
+            a[2][j] -= rij0[2];
+
+            a[0][j+1] -= rij1[0];
+            a[1][j+1] -= rij1[1];
+            a[2][j+1] -= rij1[2];
+
+            a[0][j+2] -= rij2[0];
+            a[1][j+2] -= rij2[1];
+            a[2][j+2] -= rij2[2];
+
+            a[0][j+3] -= rij3[0];
+            a[1][j+3] -= rij3[1];
+            a[2][j+3] -= rij3[2];
+        }
+        for (int j = N-(N-(i+1))%4; j < N; j++) {
             double rij[3]; // distance of i relative to j
             
             //  distance of i relative to j
-            rij[0] = r[0][i] - r[0][j];
-            rij[1] = r[1][i] - r[1][j];
-            rij[2] = r[2][i] - r[2][j];
+            rij[0] = pos_i[0] - r[0][j];
+            rij[1] = pos_i[1] - r[1][j];
+            rij[2] = pos_i[2] - r[2][j];
 
             //  dot product of distance
             double rSqd = (rij[0] * rij[0])+(rij[1] * rij[1])+(rij[2] * rij[2]);
@@ -703,14 +819,17 @@ double computeAccelerationsAndPotential2(int N, const double r[3][MAXPART], doub
             rij[2] *= f; 
 
             //  from F = ma, where m = 1 in natural units!
-            a[0][i] += rij[0];
-            a[1][i] += rij[1];
-            a[2][i] += rij[2];
+            accel_i[0] += rij[0];
+            accel_i[1] += rij[1];
+            accel_i[2] += rij[2];
 
             a[0][j] -= rij[0];
             a[1][j] -= rij[1];
             a[2][j] -= rij[2];
         }
+        a[0][i] = accel_i[0];
+        a[1][i] = accel_i[1];
+        a[2][i] = accel_i[2];
     }
     return potential;
 }
@@ -719,8 +838,8 @@ SimulationValues simulate(int N, double L, double dt, double r[3][MAXPART], doub
     double psum = 0.;
     
     //  Update positions and velocity with current velocity and acceleration
-    for (int i=0; i<N; i++) {
-        for (int j=0; j<3; j++) {
+    for (int j=0; j<3; j++) {
+        for (int i=0; i<N; i++) {
             v[j][i] += 0.5*a[j][i]*dt;
             r[j][i] += v[j][i]*dt;
         }
@@ -729,8 +848,8 @@ SimulationValues simulate(int N, double L, double dt, double r[3][MAXPART], doub
     double pe = computeAccelerationsAndPotential(N, r, a);
     
     // Elastic walls
-    for (int i=0; i<N; i++) {
-        for (int j=0; j<3; j++) {
+    for (int j=0; j<3; j++) {
+        for (int i=0; i<N; i++) {
             v[j][i] += 0.5*a[j][i]*dt; //  Update velocity with updated acceleration
 
             if (r[j][i]<0. || r[j][i]>=L) {
@@ -759,7 +878,6 @@ void initializeVelocities(int N, double Tinit, double v[3][MAXPART]) {
     int i, j;
     
     for (i=0; i<N; i++) {
-        
         for (j=0; j<3; j++) {
             //  Pull a number from a Gaussian Distribution
             v[j][i] = gaussdist();
@@ -771,14 +889,11 @@ void initializeVelocities(int N, double Tinit, double v[3][MAXPART]) {
     // Compute center-of-mas velocity according to the formula above
     double vCM[3] = {0, 0, 0};
     
-    for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            
+    for (j=0; j<3; j++) {
+        for (i=0; i<N; i++) {
             vCM[j] += m*v[j][i];
-            
         }
     }
-    
     
     for (i=0; i<3; i++) vCM[i] /= N*m;
     
@@ -786,11 +901,9 @@ void initializeVelocities(int N, double Tinit, double v[3][MAXPART]) {
     //  velocity of each particle... effectively set the
     //  center of mass velocity to zero so that the system does
     //  not drift in space!
-    for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            
+    for (j=0; j<3; j++) {
+        for (i=0; i<N; i++) {
             v[j][i] -= vCM[j];
-            
         }
     }
     
@@ -798,21 +911,17 @@ void initializeVelocities(int N, double Tinit, double v[3][MAXPART]) {
     //  by a factor which is consistent with our initial temperature, Tinit
     double vSqdSum, lambda;
     vSqdSum=0.;
-    for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            
+    for (j=0; j<3; j++) {
+        for (i=0; i<N; i++) {
             vSqdSum += v[j][i]*v[j][i];
-            
         }
     }
     
     lambda = sqrt( 3*(N-1)*Tinit/vSqdSum);
     
-    for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            
+    for (j=0; j<3; j++) {
+        for (i=0; i<N; i++) {
             v[j][i] *= lambda;
-            
         }
     }
 }
