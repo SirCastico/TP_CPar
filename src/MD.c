@@ -566,9 +566,9 @@ void computeAccelerations(int N, const double r[3][MAXPART], double a[3][MAXPART
 
 
 
-double computeAccelerationsAndPotential2(int N, double r[3][MAXPART], double a[3][MAXPART]){
+double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3][MAXPART]){
     // set all accelerations to zero
-    memset(a, 0, N*3*sizeof(double));
+    memset(a, 0, MAXPART*3*sizeof(double));
     v4df potential = v4d_set_all(0.0);
     double pot_last_iter = 0.0;
 
@@ -674,9 +674,9 @@ double computeAccelerationsAndPotential2(int N, double r[3][MAXPART], double a[3
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom. 
-double computeAccelerationsAndPotential(int N, const double r[3][MAXPART], double a[3][MAXPART]){
+double computeAccelerationsAndPotential2(int N, const double r[3][MAXPART], double a[3][MAXPART]){
     // set all accelerations to zero
-    memset(a, 0, N*3*sizeof(double));
+    memset(a, 0, MAXPART*3*sizeof(double));
     double potential=0.;
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
