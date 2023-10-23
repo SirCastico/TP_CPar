@@ -37,7 +37,7 @@ def compare_files(f1: TextIOWrapper, f2: TextIOWrapper):
 
             for num_ind in range(check_len):
                 if(l1_arr[arr_ind][num_ind]!=l2_arr[arr_ind][num_ind]):
-                    print(f"fatal line {line_num}: num1:{l1_arr[arr_ind]}, num2:{l2_arr[arr_ind]}")
+                    print(f"diff line {line_num} digit {num_ind+1}: num1:{l1_arr[arr_ind]}, num2:{l2_arr[arr_ind]}")
 
         line_num+=1
 
