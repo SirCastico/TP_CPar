@@ -55,27 +55,27 @@ typedef struct SimulationValues{
 typedef double __attribute__((vector_size(32), aligned(32))) v4df;
 typedef double __attribute__((vector_size(32), aligned(1))) __v4df_u; // internal unaligned type
 
-v4df v4d_set(double a, double b, double c, double d){
+v4df v4df_set(double a, double b, double c, double d){
     return (v4df){d,c,b,a};
 }
 
-v4df v4d_set_all(double v){
-    return v4d_set(v,v,v,v);
+v4df v4df_set_all(double v){
+    return v4df_set(v,v,v,v);
 }
 
-double v4d_h_add(v4df a){
+double v4df_h_add(v4df a){
     return a[0] + a[1] + a[2] + a[3];
 }
 
-v4df v4d_load(double *a){
+v4df v4df_load(double *a){
     return *(v4df*)a;
 }
 
-void v4d_store(v4df a, double *p){
+void v4df_store(v4df a, double *p){
   *(v4df *)p = a;
 }
 
-v4df v4d_load_u(double *a){
+v4df v4df_load_u(double *a){
     // from clang implementation of unaligned load (compatible with gcc)
     struct __loadu_pd {
     __v4df_u __v;
@@ -83,7 +83,7 @@ v4df v4d_load_u(double *a){
     return ((const struct __loadu_pd*)a)->__v;
 }
 
-void v4d_store_u(v4df a, double b[4]){
+void v4df_store_u(v4df a, double b[4]){
     // form clang implementation of unaligned store (compatible with gcc)
     struct __storeu_pd {
     __v4df_u __v;
@@ -129,8 +129,8 @@ double pow_n(double num, unsigned int exp){
     return ret;
 }
 
-v4df v4d_pow_n(v4df num, unsigned int exp){
-    v4df ret=v4d_set_all(1), acc=num;
+v4df v4df_pow_n(v4df num, unsigned int exp){
+    v4df ret=v4df_set_all(1), acc=num;
     unsigned int expt=1;
     while(expt<=exp){
         if((expt & exp) == expt)
@@ -139,10 +139,6 @@ v4df v4d_pow_n(v4df num, unsigned int exp){
         expt <<= 1;
     }
     return ret;
-}
-
-double dot_product(double d[3]){
-    return d[0]*d[0] + d[1]*d[1] + d[2]*d[2];
 }
 
 int main()
@@ -588,29 +584,29 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
     memset(a, 0, MAXPART*3*sizeof(double));
 
     // vector to accumulate the potential calculations
-    v4df potential = v4d_set_all(0.0);
+    v4df potential = v4df_set_all(0.0);
     double pot_last_iter = 0.0;
 
     // setup constants
-    v4df eps_const = v4d_set_all(8*epsilon);
-    v4df sigma12_v = v4d_set_all(sigma12), sigma6_v = v4d_set_all(sigma6);
-    v4df vec_48 = v4d_set_all(48.0), vec_24 = v4d_set_all(24.0);
+    v4df eps_const = v4df_set_all(8*epsilon);
+    v4df sigma12_v = v4df_set_all(sigma12), sigma6_v = v4df_set_all(sigma6);
+    v4df vec_48 = v4df_set_all(48.0), vec_24 = v4df_set_all(24.0);
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j, 4 j particles at a time
         double pos_i[3] = {r[0][i], r[1][i], r[2][i]};
 
         // repeat each particle i coordinate into a different vector 
-        v4df vpos_ix = v4d_set_all(pos_i[0]), vpos_iy = v4d_set_all(pos_i[1]), vpos_iz = v4d_set_all(pos_i[2]);
+        v4df vpos_ix = v4df_set_all(pos_i[0]), vpos_iy = v4df_set_all(pos_i[1]), vpos_iz = v4df_set_all(pos_i[2]);
 
         // setup particle i acceleration accumulators, storing every acceleration computation affecting particle i.
         // coordinates of same dimension are stored on the same vector.
-        v4df vaccel_ix_acc = v4d_set_all(0), vaccel_iy_acc = v4d_set_all(0), vaccel_iz_acc = v4d_set_all(0);
+        v4df vaccel_ix_acc = v4df_set_all(0), vaccel_iy_acc = v4df_set_all(0), vaccel_iz_acc = v4df_set_all(0);
 
         for (int j = i+1; j < N-((N-(i+1))%4); j+=4) {
             // load j,j+1,j+2,j+3 positions, coordinates of same dimension stored on the same vector
-            v4df pos_jx = v4d_load_u(&r[0][j]);
-            v4df pos_jy = v4d_load_u(&r[1][j]);
-            v4df pos_jz = v4d_load_u(&r[2][j]);
+            v4df pos_jx = v4df_load_u(&r[0][j]);
+            v4df pos_jy = v4df_load_u(&r[1][j]);
+            v4df pos_jz = v4df_load_u(&r[2][j]);
             
             //  distance of i relative to j,j+1,j+2,j+3, coordinates of same dimension stored on the same vector
             v4df dist_x = vpos_ix - pos_jx;
@@ -622,7 +618,7 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
             v4df dp = dist_x * dist_x + dist_y * dist_y + dist_z * dist_z;
 
             // Compute Potential of the 4 pairs
-            v4df dp3 = v4d_pow_n(dp, 3);
+            v4df dp3 = v4df_pow_n(dp, 3);
             {
                 v4df dp3_div = 1/dp3;
 
@@ -631,7 +627,7 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
             
             // Compute Accelerations of the 4 pairs
             {
-                v4df dp7 = v4d_pow_n(dp, 7);
+                v4df dp7 = v4df_pow_n(dp, 7);
 
                 //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
                 v4df forces = (vec_48 - vec_24 * dp3)/dp7;
@@ -642,9 +638,9 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
                 dist_z *= forces;
 
                 // load j,j+1,j+2,j+3 accelerations, coordinates of same dimension stored on the same vector
-                v4df accel_jx = v4d_load_u(&a[0][j]);
-                v4df accel_jy = v4d_load_u(&a[1][j]);
-                v4df accel_jz = v4d_load_u(&a[2][j]);
+                v4df accel_jx = v4df_load_u(&a[0][j]);
+                v4df accel_jy = v4df_load_u(&a[1][j]);
+                v4df accel_jz = v4df_load_u(&a[2][j]);
 
                 // accumulate particle i acceleration
                 vaccel_ix_acc += dist_x;
@@ -656,9 +652,9 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
                 accel_jy -= dist_y;
                 accel_jz -= dist_z;
 
-                v4d_store_u(accel_jx, &a[0][j]);
-                v4d_store_u(accel_jy, &a[1][j]);
-                v4d_store_u(accel_jz, &a[2][j]);
+                v4df_store_u(accel_jx, &a[0][j]);
+                v4df_store_u(accel_jy, &a[1][j]);
+                v4df_store_u(accel_jz, &a[2][j]);
             }
         }
         double accel_i_acc[3] = {0,0,0};
@@ -694,12 +690,12 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
             a[2][j] -= rij[2];
         }
         // store particle i accelerations
-        a[0][i] += accel_i_acc[0] + v4d_h_add(vaccel_ix_acc);
-        a[1][i] += accel_i_acc[1] + v4d_h_add(vaccel_iy_acc);
-        a[2][i] += accel_i_acc[2] + v4d_h_add(vaccel_iz_acc);
+        a[0][i] += accel_i_acc[0] + v4df_h_add(vaccel_ix_acc);
+        a[1][i] += accel_i_acc[1] + v4df_h_add(vaccel_iy_acc);
+        a[2][i] += accel_i_acc[2] + v4df_h_add(vaccel_iz_acc);
     }
 
-    return v4d_h_add(potential)+pot_last_iter;
+    return v4df_h_add(potential)+pot_last_iter;
 }
 
 
