@@ -6,3 +6,4 @@ callgrind.*
 perf.data*
 pr.*
 *.dump
+*.exe

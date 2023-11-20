@@ -1,30 +1,40 @@
 CC = gcc
 SRC = src/
-PROF_DIR = prof/
 CFLAGS = -O3 -g -Wall -mavx
 
-.DEFAULT_GOAL = MD.exe
+.DEFAULT_GOAL = all
 
-MD.exe: $(SRC)/MD.c
-	$(CC) $(CFLAGS) $(SRC)MD.c -lm -o MD.exe
+all: MDseq.exe MDpar.exe
 
-MD_prof: $(SRC)/MD.c
-	$(CC) $(CFLAGS) $(SRC)MD.c -pg -lm -o $(PROF_DIR)MD.exe
+MDpar.exe: $(SRC)/MDpar.c
+	$(CC) $(CFLAGS) $(SRC)MDpar.c -lm -fopenmp -o MDpar.exe
 
-gprof: MD_prof
-	$(PROF_DIR)/MD.exe < inputdata.txt
-	gprof $(PROF_DIR)MD.exe > $(PROF_DIR)gprof.out
+MDseq.exe: $(SRC)/MDseq.c
+	$(CC) $(CFLAGS) $(SRC)MDseq.c -lm -o MDseq.exe
 
 clean:
 	rm ./MD.exe
 
-run:
-	./MD.exe < inputdata.txt
+runseq:
+	./MDseq.exe < inputdata.txt
+runpar:
+	./MDpar.exe < inputdata.txt
 
 cmp:
 	python compare.py cp_average.txt original_average.txt
 	python compare.py cp_output.txt original_output.txt
 	python compare.py cp_traj.xyz original_traj.xyz
 
-run_perf:
-	perf stat -d ./MD.exe < inputdata.txt
+runseq_perf:
+	perf stat -d ./MDseq.exe < inputdata.txt
+
+runpar_perf:
+	perf stat -d ./MDpar.exe < inputdata.txt
+
+runseq_annotate:
+	perf record ./MDseq.exe < inputdata.txt
+	perf annotate -n
+
+runpar_annotate:
+	perf record ./MDpar.exe < inputdata.txt
+	perf annotate -n

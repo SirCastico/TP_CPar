@@ -277,7 +277,7 @@ int main()
     scanf("%lf",&rho);
     
     // Number of particles
-    int N = 10*216;
+    int N = 5000;
 
     double Vol = N/(rho*NA);
     
