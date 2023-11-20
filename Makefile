@@ -21,9 +21,9 @@ runpar:
 	./MDpar.exe < inputdata.txt
 
 cmp:
-	python compare.py cp_average.txt original_average.txt
-	python compare.py cp_output.txt original_output.txt
-	python compare.py cp_traj.xyz original_traj.xyz
+	python compare.py cp_average.txt seq_average.txt
+	python compare.py cp_output.txt seq_output.txt
+	python compare.py cp_traj.xyz seq_traj.xyz
 
 runseq_perf:
 	perf stat -d ./MDseq.exe < inputdata.txt
