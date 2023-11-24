@@ -13,7 +13,7 @@ MDseq.exe: $(SRC)/MDseq.c
 	$(CC) $(CFLAGS) $(SRC)MDseq.c -lm -o MDseq.exe
 
 clean:
-	rm ./MD.exe
+	rm ./MDpar.exe ./MDseq.exe
 
 runseq:
 	./MDseq.exe < inputdata.txt

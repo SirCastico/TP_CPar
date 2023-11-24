@@ -55,6 +55,8 @@ typedef struct SimulationValues{
 typedef double __attribute__((vector_size(32), aligned(32))) v4df;
 typedef double __attribute__((vector_size(32), aligned(1))) __v4df_u; // internal unaligned type
 
+#pragma omp declare reduction(+ : v4df : omp_out += omp_in)
+
 v4df v4df_set(double a, double b, double c, double d){
     return (v4df){d,c,b,a};
 }
@@ -372,7 +374,7 @@ int main()
 
     for (int i=0; i <= NumTime; i++) {
 
-        
+        //printf("%d of %d\n", i, NumTime);
 
         // This updates the positions and velocities using Newton's Laws.
         // Computes the Pressure as the sum of momentum changes from wall collisions / timestep
@@ -588,111 +590,126 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
     double pot_last_iter = 0.0;
 
     // setup constants
-    v4df eps_const = v4df_set_all(8*epsilon);
-    v4df sigma12_v = v4df_set_all(sigma12), sigma6_v = v4df_set_all(sigma6);
-    v4df vec_48 = v4df_set_all(48.0), vec_24 = v4df_set_all(24.0);
+    const v4df eps_const = v4df_set_all(8*epsilon);
+    const v4df sigma12_v = v4df_set_all(sigma12), sigma6_v = v4df_set_all(sigma6);
+    const v4df vec_48 = v4df_set_all(48.0), vec_24 = v4df_set_all(24.0);
 
-    for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j, 4 j particles at a time
-        double pos_i[3] = {r[0][i], r[1][i], r[2][i]};
+    #pragma omp parallel
+    {
+        double (*local_a_compute)[3][N] = calloc(N*3,sizeof(double));
 
-        // repeat each particle i coordinate into a different vector 
-        v4df vpos_ix = v4df_set_all(pos_i[0]), vpos_iy = v4df_set_all(pos_i[1]), vpos_iz = v4df_set_all(pos_i[2]);
+        #pragma omp for reduction(+:potential, pot_last_iter) schedule(dynamic)
+        for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j, 4 j particles at a time
+            double pos_i[3] = {r[0][i], r[1][i], r[2][i]};
 
-        // setup particle i acceleration accumulators, storing every acceleration computation affecting particle i.
-        // coordinates of same dimension are stored on the same vector.
-        v4df vaccel_ix_acc = v4df_set_all(0), vaccel_iy_acc = v4df_set_all(0), vaccel_iz_acc = v4df_set_all(0);
+            // repeat each particle i coordinate into a different vector 
+            v4df vpos_ix = v4df_set_all(pos_i[0]), vpos_iy = v4df_set_all(pos_i[1]), vpos_iz = v4df_set_all(pos_i[2]);
 
-        for (int j = i+1; j < N-((N-(i+1))%4); j+=4) {
-            // load j,j+1,j+2,j+3 positions, coordinates of same dimension stored on the same vector
-            v4df pos_jx = v4df_load_u(&r[0][j]);
-            v4df pos_jy = v4df_load_u(&r[1][j]);
-            v4df pos_jz = v4df_load_u(&r[2][j]);
-            
-            //  distance of i relative to j,j+1,j+2,j+3, coordinates of same dimension stored on the same vector
-            v4df dist_x = vpos_ix - pos_jx;
-            v4df dist_y = vpos_iy - pos_jy;
-            v4df dist_z = vpos_iz - pos_jz;
+            // setup particle i acceleration accumulators, storing every acceleration computation affecting particle i.
+            // coordinates of same dimension are stored on the same vector.
+            v4df vaccel_ix_acc = v4df_set_all(0), vaccel_iy_acc = v4df_set_all(0), vaccel_iz_acc = v4df_set_all(0);
 
-            // dot product of distance of the 4 pairs
-            // dot product for different pairs stored in different vector slots
-            v4df dp = dist_x * dist_x + dist_y * dist_y + dist_z * dist_z;
+            for (int j = i+1; j < N-((N-(i+1))%4); j+=4) {
+                // load j,j+1,j+2,j+3 positions, coordinates of same dimension stored on the same vector
+                v4df pos_jx = v4df_load_u(&r[0][j]);
+                v4df pos_jy = v4df_load_u(&r[1][j]);
+                v4df pos_jz = v4df_load_u(&r[2][j]);
+                
+                //  distance of i relative to j,j+1,j+2,j+3, coordinates of same dimension stored on the same vector
+                v4df dist_x = vpos_ix - pos_jx;
+                v4df dist_y = vpos_iy - pos_jy;
+                v4df dist_z = vpos_iz - pos_jz;
 
-            // Compute Potential of the 4 pairs
-            v4df dp3 = v4df_pow_n(dp, 3);
-            {
-                v4df dp3_div = 1/dp3;
+                // dot product of distance of the 4 pairs
+                // dot product for different pairs stored in different vector slots
+                v4df dp = dist_x * dist_x + dist_y * dist_y + dist_z * dist_z;
 
-                potential += eps_const*(sigma12_v*dp3_div - sigma6_v)*dp3_div;
+                // Compute Potential of the 4 pairs
+                v4df dp3 = v4df_pow_n(dp, 3);
+                {
+                    v4df dp3_div = 1/dp3;
+
+                    potential += eps_const*(sigma12_v*dp3_div - sigma6_v)*dp3_div;
+                }
+                
+                // Compute Accelerations of the 4 pairs
+                {
+                    v4df dp7 = v4df_pow_n(dp, 7);
+
+                    //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
+                    v4df forces = (vec_48 - vec_24 * dp3)/dp7;
+
+                    //  from F = ma, where m = 1 in natural units!
+                    dist_x *= forces;
+                    dist_y *= forces;
+                    dist_z *= forces;
+
+                    // accumulate particle i acceleration
+                    vaccel_ix_acc += dist_x;
+                    vaccel_iy_acc += dist_y;
+                    vaccel_iz_acc += dist_z;
+
+                    v4df accel_jx = v4df_load_u(&(*local_a_compute)[0][j]);
+                    v4df accel_jy = v4df_load_u(&(*local_a_compute)[1][j]);
+                    v4df accel_jz = v4df_load_u(&(*local_a_compute)[2][j]);
+
+                    // accumulate particle j,j+1,j+2,j+3 acceleration
+                    accel_jx -= dist_x;
+                    accel_jy -= dist_y;
+                    accel_jz -= dist_z;
+
+                    v4df_store_u(accel_jx, &(*local_a_compute)[0][j]);
+                    v4df_store_u(accel_jy, &(*local_a_compute)[1][j]);
+                    v4df_store_u(accel_jz, &(*local_a_compute)[2][j]);
+                }
             }
-            
-            // Compute Accelerations of the 4 pairs
-            {
-                v4df dp7 = v4df_pow_n(dp, 7);
+            double accel_i_acc[3] = {0,0,0};
+            for (int j = N-(N-(i+1))%4; j < N; j++) {
+                double rij[3]; // distance of i relative to j
+                
+                //  distance of i relative to j
+                rij[0] = pos_i[0] - r[0][j];
+                rij[1] = pos_i[1] - r[1][j];
+                rij[2] = pos_i[2] - r[2][j];
 
+                //  dot product of distance
+                double rSqd = (rij[0] * rij[0])+(rij[1] * rij[1])+(rij[2] * rij[2]);
+
+                // Compute Potential
+                double r2p3 = pow_n(rSqd,3);
+                pot_last_iter += 2*4*epsilon*(sigma12/r2p3 - sigma6)/r2p3;
+                
                 //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-                v4df forces = (vec_48 - vec_24 * dp3)/dp7;
+                double f = (48 - 24*r2p3) / pow_n(rSqd, 7);
+
+                rij[0] *= f; 
+                rij[1] *= f; 
+                rij[2] *= f; 
 
                 //  from F = ma, where m = 1 in natural units!
-                dist_x *= forces;
-                dist_y *= forces;
-                dist_z *= forces;
+                accel_i_acc[0] += rij[0];
+                accel_i_acc[1] += rij[1];
+                accel_i_acc[2] += rij[2];
 
-                // load j,j+1,j+2,j+3 accelerations, coordinates of same dimension stored on the same vector
-                v4df accel_jx = v4df_load_u(&a[0][j]);
-                v4df accel_jy = v4df_load_u(&a[1][j]);
-                v4df accel_jz = v4df_load_u(&a[2][j]);
+                (*local_a_compute)[0][j] -= rij[0];
+                (*local_a_compute)[1][j] -= rij[1];
+                (*local_a_compute)[2][j] -= rij[2];
+            }
+            // store particle i accelerations
+            (*local_a_compute)[0][i] += accel_i_acc[0] + v4df_h_add(vaccel_ix_acc);
+            (*local_a_compute)[1][i] += accel_i_acc[1] + v4df_h_add(vaccel_iy_acc);
+            (*local_a_compute)[2][i] += accel_i_acc[2] + v4df_h_add(vaccel_iz_acc);
+        }
 
-                // accumulate particle i acceleration
-                vaccel_ix_acc += dist_x;
-                vaccel_iy_acc += dist_y;
-                vaccel_iz_acc += dist_z;
-
-                // accumulate particle j,j+1,j+2,j+3 acceleration
-                accel_jx -= dist_x;
-                accel_jy -= dist_y;
-                accel_jz -= dist_z;
-
-                v4df_store_u(accel_jx, &a[0][j]);
-                v4df_store_u(accel_jy, &a[1][j]);
-                v4df_store_u(accel_jz, &a[2][j]);
+        #pragma omp critical
+        {
+            for(int i=0;i<N;++i){
+                a[0][i] += (*local_a_compute)[0][i];
+                a[1][i] += (*local_a_compute)[1][i];
+                a[2][i] += (*local_a_compute)[2][i];
             }
         }
-        double accel_i_acc[3] = {0,0,0};
-        for (int j = N-(N-(i+1))%4; j < N; j++) {
-            double rij[3]; // distance of i relative to j
-            
-            //  distance of i relative to j
-            rij[0] = pos_i[0] - r[0][j];
-            rij[1] = pos_i[1] - r[1][j];
-            rij[2] = pos_i[2] - r[2][j];
-
-            //  dot product of distance
-            double rSqd = (rij[0] * rij[0])+(rij[1] * rij[1])+(rij[2] * rij[2]);
-
-            // Compute Potential
-            double r2p3 = pow_n(rSqd,3);
-            pot_last_iter += 2*4*epsilon*(sigma12/r2p3 - sigma6)/r2p3;
-            
-            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            double f = (48 - 24*r2p3) / pow_n(rSqd, 7);
-
-            rij[0] *= f; 
-            rij[1] *= f; 
-            rij[2] *= f; 
-
-            //  from F = ma, where m = 1 in natural units!
-            accel_i_acc[0] += rij[0];
-            accel_i_acc[1] += rij[1];
-            accel_i_acc[2] += rij[2];
-
-            a[0][j] -= rij[0];
-            a[1][j] -= rij[1];
-            a[2][j] -= rij[2];
-        }
-        // store particle i accelerations
-        a[0][i] += accel_i_acc[0] + v4df_h_add(vaccel_ix_acc);
-        a[1][i] += accel_i_acc[1] + v4df_h_add(vaccel_iy_acc);
-        a[2][i] += accel_i_acc[2] + v4df_h_add(vaccel_iz_acc);
+        free(local_a_compute);
     }
 
     return v4df_h_add(potential)+pot_last_iter;
