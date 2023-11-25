@@ -598,12 +598,12 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
     {
         double (*local_a_compute)[3][N] = calloc(N*3,sizeof(double));
 
-        #pragma omp for reduction(+:potential, pot_last_iter) schedule(dynamic)
+        #pragma omp for reduction(+:potential, pot_last_iter) schedule(dynamic) 
         for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j, 4 j particles at a time
             double pos_i[3] = {r[0][i], r[1][i], r[2][i]};
 
             // repeat each particle i coordinate into a different vector 
-            v4df vpos_ix = v4df_set_all(pos_i[0]), vpos_iy = v4df_set_all(pos_i[1]), vpos_iz = v4df_set_all(pos_i[2]);
+            const v4df vpos_ix = v4df_set_all(pos_i[0]), vpos_iy = v4df_set_all(pos_i[1]), vpos_iz = v4df_set_all(pos_i[2]);
 
             // setup particle i acceleration accumulators, storing every acceleration computation affecting particle i.
             // coordinates of same dimension are stored on the same vector.

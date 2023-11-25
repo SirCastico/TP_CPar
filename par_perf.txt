@@ -1,0 +1,148 @@
+1
+
+ Performance counter stats for './MDpar.exe':
+
+         16,193.83 msec task-clock                #    1.000 CPUs utilized
+                17      context-switches          #    0.001 K/sec
+                 0      cpu-migrations            #    0.000 K/sec
+               928      page-faults               #    0.057 K/sec
+    40,071,177,589      cycles                    #    2.474 GHz                      (44.45%)
+    31,331,111,535      stalled-cycles-frontend   #   78.19% frontend cycles idle     (55.56%)
+    25,895,496,220      instructions              #    0.65  insn per cycle
+                                                  #    1.21  stalled cycles per insn  (66.67%)
+       681,740,120      branches                  #   42.099 M/sec                    (66.67%)
+         1,733,574      branch-misses             #    0.25% of all branches          (66.67%)
+     7,171,146,318      L1-dcache-loads           #  442.832 M/sec                    (66.62%)
+     1,892,226,705      L1-dcache-load-misses     #   26.39% of all L1-dcache hits    (22.22%)
+        17,239,591      LLC-loads                 #    1.065 M/sec                    (22.22%)
+             4,390      LLC-load-misses           #    0.03% of all LL-cache hits     (33.33%)
+
+      16.197478492 seconds time elapsed
+
+      16.193482000 seconds user
+       0.001000000 seconds sys
+
+
+2
+
+ Performance counter stats for './MDpar.exe':
+
+         16,311.84 msec task-clock                #    1.981 CPUs utilized
+                33      context-switches          #    0.002 K/sec
+                 1      cpu-migrations            #    0.000 K/sec
+               939      page-faults               #    0.058 K/sec
+    40,320,090,684      cycles                    #    2.472 GHz                      (44.44%)
+    31,559,921,415      stalled-cycles-frontend   #   78.27% frontend cycles idle     (55.55%)
+    25,941,209,240      instructions              #    0.64  insn per cycle
+                                                  #    1.22  stalled cycles per insn  (66.67%)
+       693,245,382      branches                  #   42.500 M/sec                    (66.67%)
+         1,922,119      branch-misses             #    0.28% of all branches          (66.67%)
+     7,176,242,168      L1-dcache-loads           #  439.941 M/sec                    (66.63%)
+     1,894,721,025      L1-dcache-load-misses     #   26.40% of all L1-dcache hits    (22.22%)
+        20,480,838      LLC-loads                 #    1.256 M/sec                    (22.22%)
+           734,745      LLC-load-misses           #    3.59% of all LL-cache hits     (33.33%)
+
+       8.232667540 seconds time elapsed
+
+      16.307412000 seconds user
+       0.004999000 seconds sys
+
+
+4
+
+ Performance counter stats for './MDpar.exe':
+
+         16,849.61 msec task-clock                #    3.894 CPUs utilized
+                38      context-switches          #    0.002 K/sec
+                 5      cpu-migrations            #    0.000 K/sec
+               983      page-faults               #    0.058 K/sec
+    41,654,643,387      cycles                    #    2.472 GHz                      (44.44%)
+    32,703,317,408      stalled-cycles-frontend   #   78.51% frontend cycles idle     (55.56%)
+    26,044,833,972      instructions              #    0.63  insn per cycle
+                                                  #    1.26  stalled cycles per insn  (66.67%)
+       723,510,856      branches                  #   42.939 M/sec                    (66.67%)
+         1,741,649      branch-misses             #    0.24% of all branches          (66.68%)
+     7,204,465,466      L1-dcache-loads           #  427.575 M/sec                    (66.63%)
+     1,898,213,270      L1-dcache-load-misses     #   26.35% of all L1-dcache hits    (22.21%)
+        15,530,886      LLC-loads                 #    0.922 M/sec                    (22.22%)
+         1,005,425      LLC-load-misses           #    6.47% of all LL-cache hits     (33.33%)
+
+       4.326753900 seconds time elapsed
+
+      16.844403000 seconds user
+       0.006000000 seconds sys
+
+
+8
+
+ Performance counter stats for './MDpar.exe':
+
+         18,055.69 msec task-clock                #    7.547 CPUs utilized
+                80      context-switches          #    0.004 K/sec
+                11      cpu-migrations            #    0.001 K/sec
+             1,140      page-faults               #    0.063 K/sec
+    44,636,236,155      cycles                    #    2.472 GHz                      (44.46%)
+    35,577,062,531      stalled-cycles-frontend   #   79.70% frontend cycles idle     (55.59%)
+    26,378,865,061      instructions              #    0.59  insn per cycle
+                                                  #    1.35  stalled cycles per insn  (66.72%)
+       818,282,167      branches                  #   45.320 M/sec                    (66.74%)
+         1,808,027      branch-misses             #    0.22% of all branches          (66.70%)
+     7,247,205,759      L1-dcache-loads           #  401.381 M/sec                    (66.47%)
+     1,900,852,047      L1-dcache-load-misses     #   26.23% of all L1-dcache hits    (22.18%)
+        19,995,438      LLC-loads                 #    1.107 M/sec                    (22.21%)
+         1,623,788      LLC-load-misses           #    8.12% of all LL-cache hits     (33.33%)
+
+       2.392384137 seconds time elapsed
+
+      18.050799000 seconds user
+       0.006000000 seconds sys
+
+
+20
+
+ Performance counter stats for './MDpar.exe':
+
+         18,604.26 msec task-clock                #   17.315 CPUs utilized
+               163      context-switches          #    0.009 K/sec
+                19      cpu-migrations            #    0.001 K/sec
+             1,046      page-faults               #    0.056 K/sec
+    45,998,446,029      cycles                    #    2.472 GHz                      (44.58%)
+    35,638,937,444      stalled-cycles-frontend   #   77.48% frontend cycles idle     (55.73%)
+    28,204,953,396      instructions              #    0.61  insn per cycle
+                                                  #    1.26  stalled cycles per insn  (66.79%)
+     1,348,906,198      branches                  #   72.505 M/sec                    (66.74%)
+         2,101,404      branch-misses             #    0.16% of all branches          (66.64%)
+     7,535,050,102      L1-dcache-loads           #  405.017 M/sec                    (66.55%)
+     1,939,607,364      L1-dcache-load-misses     #   25.74% of all L1-dcache hits    (22.20%)
+        28,954,374      LLC-loads                 #    1.556 M/sec                    (22.26%)
+         3,441,462      LLC-load-misses           #   11.89% of all LL-cache hits     (33.42%)
+
+       1.074446760 seconds time elapsed
+
+      18.599467000 seconds user
+       0.006991000 seconds sys
+
+
+40
+
+ Performance counter stats for './MDpar.exe':
+
+         38,182.39 msec task-clock                #   34.578 CPUs utilized
+               396      context-switches          #    0.010 K/sec
+                42      cpu-migrations            #    0.001 K/sec
+             1,709      page-faults               #    0.045 K/sec
+    93,744,761,330      cycles                    #    2.455 GHz                      (40.08%)
+    79,011,639,175      stalled-cycles-frontend   #   84.28% frontend cycles idle     (49.54%)
+    31,785,870,613      instructions              #    0.34  insn per cycle
+                                                  #    2.49  stalled cycles per insn  (60.15%)
+     2,314,569,988      branches                  #   60.619 M/sec                    (61.76%)
+         2,907,948      branch-misses             #    0.13% of all branches          (62.28%)
+     8,103,109,267      L1-dcache-loads           #  212.221 M/sec                    (46.67%)
+     1,785,461,136      L1-dcache-load-misses     #   22.03% of all L1-dcache hits    (25.02%)
+        69,176,284      LLC-loads                 #    1.812 M/sec                    (21.91%)
+         5,042,281      LLC-load-misses           #    7.29% of all LL-cache hits     (29.41%)
+
+       1.104250578 seconds time elapsed
+
+      38.173866000 seconds user
+       0.013009000 seconds sys
