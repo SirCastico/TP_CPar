@@ -594,11 +594,8 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
     const v4df sigma12_v = v4df_set_all(sigma12), sigma6_v = v4df_set_all(sigma6);
     const v4df vec_48 = v4df_set_all(48.0), vec_24 = v4df_set_all(24.0);
 
-    #pragma omp parallel
     {
-        double (*local_a_compute)[3][N] = calloc(N*3,sizeof(double));
 
-        #pragma omp for reduction(+:potential, pot_last_iter) schedule(dynamic) 
         for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j, 4 j particles at a time
             double pos_i[3] = {r[0][i], r[1][i], r[2][i]};
 
@@ -609,6 +606,7 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
             // coordinates of same dimension are stored on the same vector.
             v4df vaccel_ix_acc = v4df_set_all(0), vaccel_iy_acc = v4df_set_all(0), vaccel_iz_acc = v4df_set_all(0);
 
+            #pragma omp parallel for reduction(+:potential,vaccel_ix_acc,vaccel_iy_acc,vaccel_iz_acc) 
             for (int j = i+1; j < N-((N-(i+1))%4); j+=4) {
                 // load j,j+1,j+2,j+3 positions, coordinates of same dimension stored on the same vector
                 v4df pos_jx = v4df_load_u(&r[0][j]);
@@ -645,22 +643,23 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
                     dist_z *= forces;
 
                     // accumulate particle i acceleration
+
                     vaccel_ix_acc += dist_x;
                     vaccel_iy_acc += dist_y;
                     vaccel_iz_acc += dist_z;
 
-                    v4df accel_jx = v4df_load_u(&(*local_a_compute)[0][j]);
-                    v4df accel_jy = v4df_load_u(&(*local_a_compute)[1][j]);
-                    v4df accel_jz = v4df_load_u(&(*local_a_compute)[2][j]);
+                    v4df accel_jx = v4df_load_u(&a[0][j]);
+                    v4df accel_jy = v4df_load_u(&a[1][j]);
+                    v4df accel_jz = v4df_load_u(&a[2][j]);
 
                     // accumulate particle j,j+1,j+2,j+3 acceleration
                     accel_jx -= dist_x;
                     accel_jy -= dist_y;
                     accel_jz -= dist_z;
 
-                    v4df_store_u(accel_jx, &(*local_a_compute)[0][j]);
-                    v4df_store_u(accel_jy, &(*local_a_compute)[1][j]);
-                    v4df_store_u(accel_jz, &(*local_a_compute)[2][j]);
+                    v4df_store_u(accel_jx, &a[0][j]);
+                    v4df_store_u(accel_jy, &a[1][j]);
+                    v4df_store_u(accel_jz, &a[2][j]);
                 }
             }
             double accel_i_acc[3] = {0,0,0};
@@ -691,25 +690,16 @@ double computeAccelerationsAndPotential(int N, double r[3][MAXPART], double a[3]
                 accel_i_acc[1] += rij[1];
                 accel_i_acc[2] += rij[2];
 
-                (*local_a_compute)[0][j] -= rij[0];
-                (*local_a_compute)[1][j] -= rij[1];
-                (*local_a_compute)[2][j] -= rij[2];
+                a[0][j] -= rij[0];
+                a[1][j] -= rij[1];
+                a[2][j] -= rij[2];
             }
             // store particle i accelerations
-            (*local_a_compute)[0][i] += accel_i_acc[0] + v4df_h_add(vaccel_ix_acc);
-            (*local_a_compute)[1][i] += accel_i_acc[1] + v4df_h_add(vaccel_iy_acc);
-            (*local_a_compute)[2][i] += accel_i_acc[2] + v4df_h_add(vaccel_iz_acc);
+            a[0][i] += accel_i_acc[0] + v4df_h_add(vaccel_ix_acc);
+            a[1][i] += accel_i_acc[1] + v4df_h_add(vaccel_iy_acc);
+            a[2][i] += accel_i_acc[2] + v4df_h_add(vaccel_iz_acc);
         }
 
-        #pragma omp critical
-        {
-            for(int i=0;i<N;++i){
-                a[0][i] += (*local_a_compute)[0][i];
-                a[1][i] += (*local_a_compute)[1][i];
-                a[2][i] += (*local_a_compute)[2][i];
-            }
-        }
-        free(local_a_compute);
     }
 
     return v4df_h_add(potential)+pot_last_iter;
