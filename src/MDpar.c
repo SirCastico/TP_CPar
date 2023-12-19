@@ -514,21 +514,14 @@ double MeanSquaredVelocity(int N, const double v[3][MAXPART]) {
 
 //  Function to calculate the kinetic energy of the system
 double Kinetic(int N, const double v[3][MAXPART]) { 
-    
-    double v2, kin;
-    
-    kin =0.;
-    for (int j=0; j<3; j++) {
         
-        v2 = 0.;
-        for (int i=0; i<N; i++) {
-            
-            v2 += v[j][i]*v[j][i];
-            
-        }
-        kin += m*v2/2.;
-        
+    double v20=0.,v21=0.,v22 = 0.;
+    for (int i=0; i<N; i++) {
+        v20 += v[0][i]*v[0][i];
+        v21 += v[1][i]*v[1][i];
+        v22 += v[2][i]*v[2][i];
     }
+    double kin = m*(v20+v21+v22)/2.;
     
     //printf("  Total Kinetic Energy is %f\n",N*mvs*m/2.);
     return kin;
@@ -723,24 +716,36 @@ SimulationValues simulate(int N, double L, double dt, double r[3][MAXPART], doub
     double psum = 0.;
     
     //  Update positions and velocity with current velocity and acceleration
-    for (int j=0; j<3; j++) {
-        for (int i=0; i<N; i++) {
-            v[j][i] += 0.5*a[j][i]*dt;
-            r[j][i] += v[j][i]*dt;
-        }
+    for (int i=0; i<N; i++) {
+        v[0][i] += 0.5*a[0][i]*dt;
+        v[1][i] += 0.5*a[1][i]*dt;
+        v[2][i] += 0.5*a[2][i]*dt;
+
+        r[0][i] += v[0][i]*dt;
+        r[1][i] += v[1][i]*dt;
+        r[2][i] += v[2][i]*dt;
     }
     //  Update accellerations from updated positions and compute potential energy
     double pe = computeAccelerationsAndPotential(N, r, a);
 
-    // Elastic walls
-    for (int j=0; j<3; j++) {
-        for (int i=0; i<N; i++) {
-            v[j][i] += 0.5*a[j][i]*dt; //  Update velocity with updated acceleration
+    for (int i=0; i<N; i++) {
+        //  Update velocity with updated acceleration
+        v[0][i] += 0.5*a[0][i]*dt; 
+        v[1][i] += 0.5*a[1][i]*dt; 
+        v[2][i] += 0.5*a[2][i]*dt; 
 
-            if (r[j][i]<0. || r[j][i]>=L) {
-                v[j][i] *=-1.; //- elastic walls
-                psum += 2*m*fabs(v[j][i])/dt;  // contribution to pressure from "left" walls
-            }
+        // Elastic walls
+        if (r[0][i]<0. || r[0][i]>=L) {
+            v[0][i] *=-1.; //- elastic walls
+            psum += 2*m*fabs(v[0][i])/dt;  // contribution to pressure from "left" walls
+        }
+        if (r[1][i]<0. || r[1][i]>=L) {
+            v[1][i] *=-1.; //- elastic walls
+            psum += 2*m*fabs(v[1][i])/dt;  // contribution to pressure from "left" walls
+        }
+        if (r[2][i]<0. || r[2][i]>=L) {
+            v[2][i] *=-1.; //- elastic walls
+            psum += 2*m*fabs(v[2][i])/dt;  // contribution to pressure from "left" walls
         }
     }
 
