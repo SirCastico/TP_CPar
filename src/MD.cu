@@ -23,6 +23,7 @@
  Wayne NJ 07470
  
  */
+#include <string>
 #include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
@@ -161,15 +162,15 @@ struct Reductor{
 
     void reduce(double *out){
         uint32_t nBlocksReduce = local.len;
-        DeviceBuffer<double> swap{};
+
+        DeviceBuffer<double> swap{}, b1=in, b2=local;
         while(nBlocksReduce>nThreads*2){
-            reduceSum<<<nBlocksReduce, nThreads, nThreads*sizeof(double)>>>(in.buf, local.buf);
-            swap = in;
-            in = local;
-            local = swap;
-            nBlocksReduce = ceil(in.len/nThreads*2);
+            reduceSum<<<nBlocksReduce, nThreads, nThreads*sizeof(double)>>>(b1.buf, b2.buf);
+            swap = b1;
+            b1 = b2;
+            b2 = swap;
+            nBlocksReduce = ceil((float)nBlocksReduce/(float)nThreads*2);
             if(nBlocksReduce<=nThreads*2){
-                reduceSum<<<1,nBlocksReduce, nThreads*sizeof(double)>>>(in.buf, out);
                 break;
             }
         }
@@ -466,34 +467,38 @@ int main()
         updateVelocityAndPositions<<< nBlocks, nThreads >>>(N, *dev_r.buf, *dev_v.buf, *dev_a.buf, dt);
         auto error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
-            throw std::runtime_error("updVelPos");
+            throw std::runtime_error("updVelPos, iter:" + std::to_string(i));
+
         dev_a.memset(0);
-        computeAccelerationsAndPotential<<<nBlocksComb,nThreads>>>(N, *dev_a.buf, *dev_a.buf, block_i.buf, pot_red.in.buf);
+        computeAccelerationsAndPotential<<<nBlocksComb,nThreads,nThreads*sizeof(double)>>>(N, *dev_a.buf, *dev_a.buf, block_i.buf, pot_red.in.buf);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
-            throw std::runtime_error("AccelPot");
+            throw std::runtime_error("AccelPot, iter:" + std::to_string(i));
+
         pot_red.reduce(dev_pot.buf+i*nThreads*2);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
-            throw std::runtime_error("AccelPotReduce");
+            throw std::runtime_error("AccelPotReduce, iter:" + std::to_string(i));
 
         updateVelocityAndPressure<<<nBlocks,nThreads>>>(N, *dev_r.buf, *dev_v.buf, *dev_a.buf, dt, L, pr_red.in.buf);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
-            throw std::runtime_error("velPress");
+            throw std::runtime_error("velPress, iter:" + std::to_string(i));
+
         pr_red.reduce(dev_pressure.buf+i*nThreads*2);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
-            throw std::runtime_error("VelPressRed");
+            throw std::runtime_error("VelPressRed, iter:" + std::to_string(i));
 
-        sumOfLengths<<<nBlocks,nThreads>>>(N, *dev_v.buf, lsum_red.in.buf);
+        sumOfLengths<<<nBlocks,nThreads,nThreads*sizeof(double)>>>(N, *dev_v.buf, lsum_red.in.buf);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
-            throw std::runtime_error("sumLenghts");
+            throw std::runtime_error("sumLenghts, iter:" + std::to_string(i));
+
         lsum_red.reduce(dev_lsum.buf+i*nThreads*2);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
-            throw std::runtime_error("sumLenReduce");
+            throw std::runtime_error("sumLenReduce, iter:" + std::to_string(i));
     }
 
     printf("allocating dev out\n");
@@ -502,9 +507,9 @@ int main()
     auto dev_pot_out = DeviceBuffer<double>::newBuffer(NumTime);
     int nBlocksOut = ceil((float)dev_pressure.len/(float)nThreads*2);
     printf("reducing out\n");
-    reduceSum<<<nBlocksOut,nThreads,nBlocksOut*sizeof(double)>>>(dev_pressure.buf, dev_pressure_out.buf);
-    reduceSum<<<nBlocksOut,nThreads,nBlocksOut*sizeof(double)>>>(dev_lsum.buf,dev_lsum_out.buf);
-    reduceSum<<<nBlocksOut,nThreads,nBlocksOut*sizeof(double)>>>(dev_pot.buf,dev_pot_out.buf);
+    reduceSum<<<nBlocksOut,nThreads,nThreads*sizeof(double)>>>(dev_pressure.buf, dev_pressure_out.buf);
+    reduceSum<<<nBlocksOut,nThreads,nThreads*sizeof(double)>>>(dev_lsum.buf,dev_lsum_out.buf);
+    reduceSum<<<nBlocksOut,nThreads,nThreads*sizeof(double)>>>(dev_pot.buf,dev_pot_out.buf);
 
     double host_pressure_out[NumTime];
     double host_lsum_out[NumTime];
