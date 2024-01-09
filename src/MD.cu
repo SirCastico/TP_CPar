@@ -23,6 +23,7 @@
  Wayne NJ 07470
  
  */
+#include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -131,14 +132,22 @@ struct DeviceBuffer{
     }
     static DeviceBuffer newBuffer(size_t len){
         DeviceBuffer<T> db{};
-        cudaMalloc(&db.buf, len*sizeof(T));
+        auto error = cudaMalloc(&db.buf, len*sizeof(T));
+        if(error!=cudaSuccess){
+            printf("cudamalloc error:%s - %s\n", cudaGetErrorName(error), cudaGetErrorString(error));
+            exit(1);
+        }
         db.len = len;
         return db;
     }
 
     static DeviceBuffer fromCPUBuffer(T *cpu_buf, size_t len){
         DeviceBuffer<T> db{};
-        cudaMalloc(&db.buf, len*sizeof(T));
+        auto error = cudaMalloc(&db.buf, len*sizeof(T));
+        if(error!=cudaSuccess){
+            printf("cudamalloc error:%s - %s\n", cudaGetErrorName(error), cudaGetErrorString(error));
+            exit(1);
+        }
         cudaMemcpy(db.buf, cpu_buf, len*sizeof(T), cudaMemcpyHostToDevice);
         db.len = len;
         return db;
@@ -154,13 +163,13 @@ struct Reductor{
         uint32_t nBlocksReduce = local.len;
         DeviceBuffer<double> swap{};
         while(nBlocksReduce>nThreads*2){
-            reduceSum<<<nBlocksReduce, nThreads, nBlocksReduce*sizeof(double)>>>(in.buf, local.buf);
+            reduceSum<<<nBlocksReduce, nThreads, nThreads*sizeof(double)>>>(in.buf, local.buf);
             swap = in;
             in = local;
             local = swap;
             nBlocksReduce = ceil(in.len/nThreads*2);
             if(nBlocksReduce<=nThreads*2){
-                reduceSum<<<1,nBlocksReduce, nBlocksReduce*sizeof(double)>>>(in.buf, out);
+                reduceSum<<<1,nBlocksReduce, nThreads*sizeof(double)>>>(in.buf, out);
                 break;
             }
         }
@@ -416,10 +425,12 @@ int main()
     int combs = combinations(N,2);
     int nBlocksComb = ceil((float)combs/(float)nThreads);
 
+    printf("allocating dev rav buffers\n");
     auto dev_r = DeviceBuffer<double[3][MAXPART]>::fromCPUBuffer(&r, 1);
     auto dev_a = DeviceBuffer<double[3][MAXPART]>::fromCPUBuffer(&a, 1);
     auto dev_v = DeviceBuffer<double[3][MAXPART]>::fromCPUBuffer(&v, 1);
 
+    printf("allocating dev sim val buffers\n");
     auto dev_pressure = DeviceBuffer<double>::newBuffer(NumTime*nThreads*2);
     auto dev_lsum = DeviceBuffer<double>::newBuffer(NumTime*nThreads*2);
     auto dev_pot = DeviceBuffer<double>::newBuffer(NumTime*nThreads*2);
@@ -427,43 +438,70 @@ int main()
     dev_lsum.memset(0);
     dev_pot.memset(0);
 
+    printf("calculating block_i n:%d\n", nBlocksComb);
     std::vector<uint16_t> cpu_block_i{};
     cpu_block_i.reserve(nBlocksComb);
     for(uint16_t i=0,j=0;;){
         j+=nThreads*2;
-        if(i>=nBlocksComb){
+        if(j>=N){
             i++;
-            j=0;
-            if(i>=nBlocksComb)
+            j=i+1;
+            if(j>=N)
                 break;
         }
         cpu_block_i.push_back(i);
     }
 
+    printf("allocating block_i\n");
     auto block_i = DeviceBuffer<uint16_t>::fromCPUBuffer(cpu_block_i.data(),nBlocksComb);
 
+    printf("allocating reductors\n");
     auto pot_red = Reductor::newReductor(nBlocksComb, nThreads);
     auto lsum_red = Reductor::newReductor(nBlocks, nThreads);
     auto pr_red = Reductor::newReductor(nBlocks, nThreads);
 
+    printf("starting simulation loop\n");
     for (int i=0; i <= NumTime; i++) {
 
         updateVelocityAndPositions<<< nBlocks, nThreads >>>(N, *dev_r.buf, *dev_v.buf, *dev_a.buf, dt);
-
-        computeAccelerationsAndPotential<<<nBlocksComb,nThreads>>>(N, r, a, block_i.buf, pot_red.in.buf);
+        auto error = cudaDeviceSynchronize();
+        if(error!=cudaSuccess)
+            throw std::runtime_error("updVelPos");
+        dev_a.memset(0);
+        computeAccelerationsAndPotential<<<nBlocksComb,nThreads>>>(N, *dev_a.buf, *dev_a.buf, block_i.buf, pot_red.in.buf);
+        error = cudaDeviceSynchronize();
+        if(error!=cudaSuccess)
+            throw std::runtime_error("AccelPot");
         pot_red.reduce(dev_pot.buf+i*nThreads*2);
+        error = cudaDeviceSynchronize();
+        if(error!=cudaSuccess)
+            throw std::runtime_error("AccelPotReduce");
 
-        updateVelocityAndPressure<<<nBlocks,nThreads>>>(N, r, v, a, dt, L, pr_red.in.buf);
-        pot_red.reduce(dev_pressure.buf+i*nThreads*2);
+        updateVelocityAndPressure<<<nBlocks,nThreads>>>(N, *dev_r.buf, *dev_v.buf, *dev_a.buf, dt, L, pr_red.in.buf);
+        error = cudaDeviceSynchronize();
+        if(error!=cudaSuccess)
+            throw std::runtime_error("velPress");
+        pr_red.reduce(dev_pressure.buf+i*nThreads*2);
+        error = cudaDeviceSynchronize();
+        if(error!=cudaSuccess)
+            throw std::runtime_error("VelPressRed");
 
-        sumOfLengths<<<nBlocks,nThreads>>>(N, v, lsum_red.in.buf);
+        sumOfLengths<<<nBlocks,nThreads>>>(N, *dev_v.buf, lsum_red.in.buf);
+        error = cudaDeviceSynchronize();
+        if(error!=cudaSuccess)
+            throw std::runtime_error("sumLenghts");
         lsum_red.reduce(dev_lsum.buf+i*nThreads*2);
+        error = cudaDeviceSynchronize();
+        if(error!=cudaSuccess)
+            throw std::runtime_error("sumLenReduce");
     }
 
+    printf("allocating dev out\n");
     auto dev_pressure_out = DeviceBuffer<double>::newBuffer(NumTime);
     auto dev_lsum_out = DeviceBuffer<double>::newBuffer(NumTime);
     auto dev_pot_out = DeviceBuffer<double>::newBuffer(NumTime);
     int nBlocksOut = ceil((float)dev_pressure.len/(float)nThreads*2);
+    printf("reducing out\n");
     reduceSum<<<nBlocksOut,nThreads,nBlocksOut*sizeof(double)>>>(dev_pressure.buf, dev_pressure_out.buf);
     reduceSum<<<nBlocksOut,nThreads,nBlocksOut*sizeof(double)>>>(dev_lsum.buf,dev_lsum_out.buf);
     reduceSum<<<nBlocksOut,nThreads,nBlocksOut*sizeof(double)>>>(dev_pot.buf,dev_pot_out.buf);
@@ -472,6 +510,7 @@ int main()
     double host_lsum_out[NumTime];
     double host_pot_out[NumTime];
 
+    printf("copying out\n");
     dev_pressure_out.memcpyToHost(host_pressure_out);
     dev_lsum_out.memcpyToHost(host_lsum_out);
     dev_pot_out.memcpyToHost(host_pot_out);
@@ -778,10 +817,10 @@ __global__ void computeAccelerationsAndPotential(int N, const double r[3][MAXPAR
         rij[2] = r[2][i] - r[2][j];
 
         double rSqd = (rij[0] * rij[0])+(rij[1] * rij[1])+(rij[2] * rij[2]);
-        double r2p3 = pow_n(rSqd,3);
+        double r2p3 = rSqd*rSqd*rSqd;
         sdata[tid] = 2*4*epsilon*(sigma12/r2p3 - sigma6)/r2p3;
 
-        double f = (48 - 24*r2p3) / pow_n(rSqd, 7);
+        double f = (48 - 24*r2p3) / rSqd*rSqd*rSqd*rSqd*rSqd*rSqd*rSqd;
 
         rij[0] *= f; 
         rij[1] *= f; 

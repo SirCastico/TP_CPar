@@ -15,6 +15,8 @@ MDseq.exe: $(SRC)/MDseq.c
 MDcuda.exe: $(SRC)/MD.cu
 	nvcc -O3 -g -std=c++11 -arch=sm_35 $(SRC)MD.cu -lm -Wno-deprecated-gpu-targets -o MDcuda.exe
 
+cuda: MDcuda.exe
+
 clean:
 	rm ./MDpar.exe ./MDseq.exe
 
