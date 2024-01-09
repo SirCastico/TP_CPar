@@ -29,13 +29,14 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdalign.h>
+#include <stdint.h>
 #include <immintrin.h>
-
+#include <vector>
 
 //  Lennard-Jones parameters in natural units!
 const double sigma = 1.;
-const double sigma12 = sigma;
-const double sigma6 = sigma;
+const double sigma12 = 1.;
+const double sigma6 = 1.;
 const double epsilon = 1.;
 const double m = 1.;
 const double kB = 1.;
@@ -74,6 +75,30 @@ double MeanSquaredVelocity(int N, const double v[3][MAXPART]);
 double Kinetic(int N, const double v[3][MAXPART]);
 SimulationValues simulate(int N, double L, double dt, double r[3][MAXPART], double v[3][MAXPART], double a[3][MAXPART]);
 
+__global__ void updateVelocityAndPositions(int N, double r[3][MAXPART], double a[3][MAXPART], double v[3][MAXPART], double dt);
+__global__ void computeAccelerationsAndPotential(int N, const double r[3][MAXPART],double a[3][MAXPART], uint16_t *block_i, double *pot_out);
+__global__ void updateVelocityAndPressure(int N, double r[3][MAXPART], double v[3][MAXPART], double a[3][MAXPART], double dt, int L, double pressure[MAXPART]);
+__global__ void reduceSum(double *arr_in, double *arr_out);
+__global__ void sumOfLengths(int N, const double v[3][MAXPART], double* result);
+
+__device__ double myAtomicAdd(double* address, double val)
+{
+    unsigned long long int* address_as_ull =
+                              (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
+
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed,
+                        __double_as_longlong(val +
+                               __longlong_as_double(assumed)));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+    } while (assumed != old);
+
+    return __longlong_as_double(old);
+}
+
 // Calculates power by dividing into multiplication of powers with exponents 1 or multiple of 2.
 // Powers are accumulated.
 // Ex: 4^7 = 4 * 4^2 * (4^2)^2 = 6 multiplications.
@@ -88,6 +113,83 @@ double pow_n(double num, unsigned int exp){
         expt <<= 1;
     }
     return ret;
+}
+
+template<typename T>
+struct DeviceBuffer{
+    T *buf;
+    size_t len;
+
+    void free(){
+        cudaFree(this->buf);
+    }
+    void memset(uint8_t byte){
+        cudaMemset(this->buf, byte, this->len*sizeof(T));
+    }
+    void memcpyToHost(T *other){
+        cudaMemcpy(other, this->buf, this->len*sizeof(T),cudaMemcpyDeviceToHost);
+    }
+    static DeviceBuffer newBuffer(size_t len){
+        DeviceBuffer<T> db{};
+        cudaMalloc(&db.buf, len*sizeof(T));
+        db.len = len;
+        return db;
+    }
+
+    static DeviceBuffer fromCPUBuffer(T *cpu_buf, size_t len){
+        DeviceBuffer<T> db{};
+        cudaMalloc(&db.buf, len*sizeof(T));
+        cudaMemcpy(db.buf, cpu_buf, len*sizeof(T), cudaMemcpyHostToDevice);
+        db.len = len;
+        return db;
+    }
+};
+
+
+struct Reductor{
+    uint32_t nThreads;
+    DeviceBuffer<double> in, local;
+
+    void reduce(double *out){
+        uint32_t nBlocksReduce = local.len;
+        DeviceBuffer<double> swap{};
+        while(nBlocksReduce>nThreads*2){
+            reduceSum<<<nBlocksReduce, nThreads, nBlocksReduce*sizeof(double)>>>(in.buf, local.buf);
+            swap = in;
+            in = local;
+            local = swap;
+            nBlocksReduce = ceil(in.len/nThreads*2);
+            if(nBlocksReduce<=nThreads*2){
+                reduceSum<<<1,nBlocksReduce, nBlocksReduce*sizeof(double)>>>(in.buf, out);
+                break;
+            }
+        }
+    }
+
+    void free(){
+        in.free();
+        local.free();
+    }
+
+    static Reductor newReductor(uint32_t len, uint32_t nThreads){
+        Reductor red;
+        red.in = DeviceBuffer<double>::newBuffer(len);
+        red.local = DeviceBuffer<double>::newBuffer(ceil((float)len/(nThreads*2)));
+        red.nThreads = nThreads;
+        return red;
+    }
+};
+
+uint32_t combinations(uint32_t n, uint32_t c){
+    uint32_t x = n;
+    for(int i=1;i<c;i++){
+        x*=n-i;
+    }
+    uint32_t d = c;
+    for(int i=1;i<c-1;i++){
+        d*=c-i;
+    }
+    return x/d;
 }
 
 int main()
@@ -306,58 +408,110 @@ int main()
     fprintf(ofp,"  time (s)              T(t) (K)              P(t) (Pa)           Kinetic En. (n.u.)     Potential En. (n.u.) Total En. (n.u.)\n");
     printf("  SIMULATING...:\n\n");
 
-    struct SimulationResult {
-        double time;
-        double temperature;
-        double pressure;
-        double kineticEnergy;
-        double potentialEnergy;
-        double totalEnergy;
-    };
-
     double gc, Z;
 
-    struct SimulationResult results[NumTime]; // Max is 50000
-    
+    int nThreads = 64;
+    int nBlocks = ceil((float)N / (float)nThreads);
+
+    int combs = combinations(N,2);
+    int nBlocksComb = ceil((float)combs/(float)nThreads);
+
+    auto dev_r = DeviceBuffer<double[3][MAXPART]>::fromCPUBuffer(&r, 1);
+    auto dev_a = DeviceBuffer<double[3][MAXPART]>::fromCPUBuffer(&a, 1);
+    auto dev_v = DeviceBuffer<double[3][MAXPART]>::fromCPUBuffer(&v, 1);
+
+    auto dev_pressure = DeviceBuffer<double>::newBuffer(NumTime*nThreads*2);
+    auto dev_lsum = DeviceBuffer<double>::newBuffer(NumTime*nThreads*2);
+    auto dev_pot = DeviceBuffer<double>::newBuffer(NumTime*nThreads*2);
+    dev_pressure.memset(0);
+    dev_lsum.memset(0);
+    dev_pot.memset(0);
+
+    std::vector<uint16_t> cpu_block_i{};
+    cpu_block_i.reserve(nBlocksComb);
+    for(uint16_t i=0,j=0;;){
+        j+=nThreads*2;
+        if(i>=nBlocksComb){
+            i++;
+            j=0;
+            if(i>=nBlocksComb)
+                break;
+        }
+        cpu_block_i.push_back(i);
+    }
+
+    auto block_i = DeviceBuffer<uint16_t>::fromCPUBuffer(cpu_block_i.data(),nBlocksComb);
+
+    auto pot_red = Reductor::newReductor(nBlocksComb, nThreads);
+    auto lsum_red = Reductor::newReductor(nBlocks, nThreads);
+    auto pr_red = Reductor::newReductor(nBlocks, nThreads);
 
     for (int i=0; i <= NumTime; i++) {
 
-        //printf("%d of %d\n", i, NumTime);
+        updateVelocityAndPositions<<< nBlocks, nThreads >>>(N, *dev_r.buf, *dev_v.buf, *dev_a.buf, dt);
 
-        // This updates the positions and velocities using Newton's Laws.
-        // Computes the Pressure as the sum of momentum changes from wall collisions / timestep
-        // which is a Kinetic Theory of gasses concept of Pressure.
-        // Also computes Instantaneous mean velocity squared, Potential and Kinetic Energy.
-        SimulationValues vals = simulate(N, L, dt, r, v, a);
-        vals.pressure *= PressFac;
+        computeAccelerationsAndPotential<<<nBlocksComb,nThreads>>>(N, r, a, block_i.buf, pot_red.in.buf);
+        pot_red.reduce(dev_pot.buf+i*nThreads*2);
 
-        // Temperature from Kinetic Theory
-        double Temp = m*vals.mvs/(3*kB) * TempFac;
-        
-        // Instantaneous gas constant and compressibility - not well defined because
-        // pressure may be zero in some instances because there will be zero wall collisions,
-        // pressure may be very high in some instances because there will be a number of collisions
-        gc = NA*vals.pressure*(Vol*VolFac)/(N*Temp);
-        Z  = vals.pressure*(Vol*VolFac)/(N*kBSI*Temp);
-        
-        Tavg += Temp;
-        Pavg += vals.pressure;
-        
-        // Store the results in the struct
-        results[i].time = i * dt * timefac;
-        results[i].temperature = Temp;
-        results[i].pressure = vals.pressure;
-        results[i].kineticEnergy = vals.ke;
-        results[i].potentialEnergy = vals.pe;
-        results[i].totalEnergy = vals.ke + vals.pe;
+        updateVelocityAndPressure<<<nBlocks,nThreads>>>(N, r, v, a, dt, L, pr_red.in.buf);
+        pot_red.reduce(dev_pressure.buf+i*nThreads*2);
+
+        sumOfLengths<<<nBlocks,nThreads>>>(N, v, lsum_red.in.buf);
+        lsum_red.reduce(dev_lsum.buf+i*nThreads*2);
     }
 
-    for (int j = 0; j <= NumTime; j++) {
+    auto dev_pressure_out = DeviceBuffer<double>::newBuffer(NumTime);
+    auto dev_lsum_out = DeviceBuffer<double>::newBuffer(NumTime);
+    auto dev_pot_out = DeviceBuffer<double>::newBuffer(NumTime);
+    int nBlocksOut = ceil((float)dev_pressure.len/(float)nThreads*2);
+    reduceSum<<<nBlocksOut,nThreads,nBlocksOut*sizeof(double)>>>(dev_pressure.buf, dev_pressure_out.buf);
+    reduceSum<<<nBlocksOut,nThreads,nBlocksOut*sizeof(double)>>>(dev_lsum.buf,dev_lsum_out.buf);
+    reduceSum<<<nBlocksOut,nThreads,nBlocksOut*sizeof(double)>>>(dev_pot.buf,dev_pot_out.buf);
+
+    double host_pressure_out[NumTime];
+    double host_lsum_out[NumTime];
+    double host_pot_out[NumTime];
+
+    dev_pressure_out.memcpyToHost(host_pressure_out);
+    dev_lsum_out.memcpyToHost(host_lsum_out);
+    dev_pot_out.memcpyToHost(host_pot_out);
+
+    for(int i=0;i<=NumTime;++i){
+        double time = i * dt * timefac;
+        double pressure = host_pressure_out[i]*PressFac;
+        double msv = host_lsum_out[i]/N;
+        double ke = m*host_lsum_out[i]/2.0;
+        double temp = m*msv/(3*kB) * TempFac;
+        double pe = host_pot_out[i];
+
+        Tavg += temp;
+        Pavg += pressure;
+        
         fprintf(ofp, "  %8.4e  %20.8f  %20.8f %20.8f  %20.8f  %20.8f \n",
-        results[j].time, results[j].temperature, results[j].pressure,
-        results[j].kineticEnergy, results[j].potentialEnergy, results[j].totalEnergy);
+            time, temp, pressure, ke, pe, ke+pe);
     }
+    
+    dev_r.free();
+    dev_a.free();
+    dev_v.free();
 
+    dev_pressure.free();
+    dev_lsum.free();
+    dev_pot.free();
+
+    block_i.free();
+
+    pot_red.free();
+    lsum_red.free();
+    pr_red.free();
+
+    dev_pressure.free();
+    dev_lsum.free();
+    dev_pot.free();
+
+    dev_pressure_out.free();
+    dev_lsum_out.free();
+    dev_pot_out.free();
     // Because we have calculated the instantaneous temperature and pressure,
     // we can take the average over the whole simulation here
     Pavg /= NumTime;
@@ -530,7 +684,7 @@ __global__ void updateVelocityAndPositions(int N, double r[3][MAXPART], double a
     r[2][id] += v[2][id]*dt;
 }
 
-__global__ updateVelocityAndPressure(int N, double r[3][MAXPART], double v[3][MAXPART], double a[3][MAXPART], double dt, int L, double pressure[MAXPART]){
+__global__ void updateVelocityAndPressure(int N, double r[3][MAXPART], double v[3][MAXPART], double a[3][MAXPART], double dt, int L, double pressure[MAXPART]){
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     if(id>=N) return;
 
@@ -551,32 +705,105 @@ __global__ updateVelocityAndPressure(int N, double r[3][MAXPART], double v[3][MA
     pressure[id] = b2*2*m*fabs(v[2][id])/dt;
 }
 
-// Executes a step in the simulation and updates the particles' properties.
-// Returns pressure from collisions with elastic walls, potential energy, 
-// mean squared velocity of particles and the total kinetic energy. 
-SimulationValues simulate(int N, double L, double dt, double r[3][MAXPART], double v[3][MAXPART], double a[3][MAXPART]) {
-    double psum = 0.;
-    int blockSize = 64;
-    int gridSize = ceil((float)N / (float)blockSize);
-    updateVelocityAndPositions<< blockSize, gridSize >>(N, r, v, a, dt);
-    
-    //  Update accellerations from updated positions and compute potential energy
-    double pe = computeAccelerationsAndPotential(N, r, a);
 
-    updateVelocityAndPressure(int N, double (*r)[5001], double (*v)[5001], double (*a)[5001], double dt, int L, double *pressure);
-    reduce(); // reduce add pressure array into single pressure value
+// reduce sum arr_in[blockIdx.x * blockDim.x] to arr_out[blockIdx.x]
+__global__ void reduceSum(double *arr_in, double *arr_out){
+    unsigned int tid = threadIdx.x;
+    unsigned int i = blockIdx.x*(blockDim.x*2) + threadIdx.x;
 
-    double mvs = MeanSquaredVelocity(N, v);
-    double ke = Kinetic(N, v);
+    extern __shared__ double s_arr[];
 
-    SimulationValues values = {
-        .pressure = psum/(6*L*L),
-        .mvs = mvs,
-        .ke = ke,
-        .pe = pe,
-    };
+    s_arr[tid] = arr_in[i] + arr_in[i + blockDim.x];
+    __syncthreads();
 
-    return values;
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            s_arr[tid] += s_arr[tid + s];
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        arr_out[blockIdx.x] = s_arr[0];
+    }
+}
+
+__global__ void sumOfLengths(int N, const double v[3][MAXPART], double* result) {
+    unsigned int tid = threadIdx.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    extern __shared__ double sdata[];
+    sdata[tid] = 0.0;
+
+    if (i < N) {
+        double v20 = v[0][i] * v[0][i];
+        double v21 = v[1][i] * v[1][i];
+        double v22 = v[2][i] * v[2][i];
+        sdata[tid] = v20 + v21 + v22;
+    }
+
+    __syncthreads();
+
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            sdata[tid] += sdata[tid + s];
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        result[blockIdx.x] = sdata[0];
+    }
+}
+
+__global__ void computeAccelerationsAndPotential(int N, const double r[3][MAXPART],double a[3][MAXPART], uint16_t *block_i, double *pot_out){
+    uint32_t tid = threadIdx.x;
+    uint32_t bid = blockIdx.x;
+    uint32_t id = blockIdx.x * blockDim.x + threadIdx.x;
+
+    extern __shared__ double sdata[];
+    sdata[tid] = 0;
+    __syncthreads();
+
+    uint32_t i = block_i[bid];
+    uint32_t j = bid * blockDim.x + tid + i + 1;
+    if(j>=N){
+        i+=1;
+        j=i+1;
+    }
+    double rij[3];
+    if(i<N-1){
+        rij[0] = r[0][i] - r[0][j];
+        rij[1] = r[1][i] - r[1][j];
+        rij[2] = r[2][i] - r[2][j];
+
+        double rSqd = (rij[0] * rij[0])+(rij[1] * rij[1])+(rij[2] * rij[2]);
+        double r2p3 = pow_n(rSqd,3);
+        sdata[tid] = 2*4*epsilon*(sigma12/r2p3 - sigma6)/r2p3;
+
+        double f = (48 - 24*r2p3) / pow_n(rSqd, 7);
+
+        rij[0] *= f; 
+        rij[1] *= f; 
+        rij[2] *= f; 
+
+        myAtomicAdd(&a[0][i], rij[0]);
+        myAtomicAdd(&a[1][i], rij[1]);
+        myAtomicAdd(&a[2][i], rij[2]);
+
+        myAtomicAdd(&a[0][j], -rij[0]);
+        myAtomicAdd(&a[1][j], -rij[1]);
+        myAtomicAdd(&a[2][j], -rij[2]);
+    }
+
+
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            sdata[tid] += sdata[tid + s];
+        }
+        __syncthreads();
+    }
+    if(tid==0) pot_out[bid] = sdata[0];
 }
 
 

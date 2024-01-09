@@ -4,13 +4,16 @@ CFLAGS = -O3 -g -Wall -mavx
 
 .DEFAULT_GOAL = all
 
-all: MDseq.exe MDpar.exe
+all: MDseq.exe MDpar.exe MDcuda.exe
 
 MDpar.exe: $(SRC)/MDpar.c
 	$(CC) $(CFLAGS) $(SRC)MDpar.c -lm -fopenmp -o MDpar.exe
 
 MDseq.exe: $(SRC)/MDseq.c
 	$(CC) $(CFLAGS) $(SRC)MDseq.c -lm -o MDseq.exe
+
+MDcuda.exe: $(SRC)/MD.cu
+	nvcc -O3 -g -std=c++11 -arch=sm_35 $(SRC)MD.cu -lm -Wno-deprecated-gpu-targets -o MDcuda.exe
 
 clean:
 	rm ./MDpar.exe ./MDseq.exe

@@ -34,8 +34,8 @@
 
 //  Lennard-Jones parameters in natural units!
 const double sigma = 1.;
-const double sigma12 = sigma;
-const double sigma6 = sigma;
+const double sigma12 = 1.;
+const double sigma6 = 1.;
 const double epsilon = 1.;
 const double m = 1.;
 const double kB = 1.;
