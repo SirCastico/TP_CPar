@@ -125,7 +125,7 @@ struct DeviceBuffer{
     void free(){
         cudaFree(this->buf);
     }
-    void memset(uint8_t byte){
+    void memset(int byte){
         cudaMemset(this->buf, byte, this->len*sizeof(T));
     }
     void memcpyToHost(T *other){
@@ -161,18 +161,22 @@ struct Reductor{
     DeviceBuffer<double> in, local;
 
     void reduce(double *out){
+        if(in.len<=nThreads){
+            cudaMemcpy(out, in.buf, nThreads*sizeof(double), cudaMemcpyDeviceToDevice);
+            return;
+        }
         uint32_t nBlocksReduce = local.len;
 
         DeviceBuffer<double> swap{}, b1=in, b2=local;
-        while(nBlocksReduce>nThreads*2){
+        while(nBlocksReduce>nThreads){
             reduceSum<<<nBlocksReduce, nThreads, nThreads*sizeof(double)>>>(b1.buf, b2.buf);
             swap = b1;
             b1 = b2;
             b2 = swap;
-            nBlocksReduce = ceil((float)nBlocksReduce/(float)nThreads*2);
-            if(nBlocksReduce<=nThreads*2){
-                break;
-            }
+            nBlocksReduce = ceil((float)nBlocksReduce/(float)nThreads);
+        }
+        if(nBlocksReduce<=nThreads){
+            reduceSum<<<nBlocksReduce, nThreads, nThreads*sizeof(double)>>>(b1.buf, out);
         }
     }
 
@@ -184,7 +188,7 @@ struct Reductor{
     static Reductor newReductor(uint32_t len, uint32_t nThreads){
         Reductor red;
         red.in = DeviceBuffer<double>::newBuffer(len);
-        red.local = DeviceBuffer<double>::newBuffer(ceil((float)len/(nThreads*2)));
+        red.local = DeviceBuffer<double>::newBuffer(ceil((float)len/(nThreads)));
         red.nThreads = nThreads;
         return red;
     }
@@ -200,6 +204,14 @@ uint32_t combinations(uint32_t n, uint32_t c){
         d*=c-i;
     }
     return x/d;
+}
+
+double arrSum(double *v, int n){
+    double sum=0;
+    for(int i=0;i<n;++i){
+        sum+=v[i];
+    }
+    return sum;
 }
 
 int main()
@@ -421,10 +433,10 @@ int main()
     double gc, Z;
 
     int nThreads = 64;
-    int nBlocks = ceil((float)N / (float)nThreads);
+    int nBlocks = ceil((float)N / (float)(nThreads));
 
     int combs = combinations(N,2);
-    int nBlocksComb = ceil((float)combs/(float)nThreads);
+    int nBlocksComb = ceil((float)combs/(float)(nThreads));
 
     printf("allocating dev rav buffers\n");
     auto dev_r = DeviceBuffer<double[3][MAXPART]>::fromCPUBuffer(&r, 1);
@@ -432,9 +444,9 @@ int main()
     auto dev_v = DeviceBuffer<double[3][MAXPART]>::fromCPUBuffer(&v, 1);
 
     printf("allocating dev sim val buffers\n");
-    auto dev_pressure = DeviceBuffer<double>::newBuffer(NumTime*nThreads*2);
-    auto dev_lsum = DeviceBuffer<double>::newBuffer(NumTime*nThreads*2);
-    auto dev_pot = DeviceBuffer<double>::newBuffer(NumTime*nThreads*2);
+    auto dev_pressure = DeviceBuffer<double>::newBuffer(NumTime*nThreads+1);
+    auto dev_lsum = DeviceBuffer<double>::newBuffer(NumTime*nThreads+1);
+    auto dev_pot = DeviceBuffer<double>::newBuffer(NumTime*nThreads+1);
     dev_pressure.memset(0);
     dev_lsum.memset(0);
     dev_pot.memset(0);
@@ -443,7 +455,7 @@ int main()
     std::vector<uint16_t> cpu_block_i{};
     cpu_block_i.reserve(nBlocksComb);
     for(uint16_t i=0,j=0;;){
-        j+=nThreads*2;
+        j+=nThreads;
         if(j>=N){
             i++;
             j=i+1;
@@ -461,6 +473,10 @@ int main()
     auto lsum_red = Reductor::newReductor(nBlocks, nThreads);
     auto pr_red = Reductor::newReductor(nBlocks, nThreads);
 
+    auto t_buf = DeviceBuffer<double>::newBuffer(nThreads);
+    std::vector<double> t_cbuf{};
+    t_cbuf.resize(nThreads);
+
     printf("starting simulation loop\n");
     for (int i=0; i <= NumTime; i++) {
 
@@ -470,42 +486,51 @@ int main()
             throw std::runtime_error("updVelPos, iter:" + std::to_string(i));
 
         dev_a.memset(0);
-        computeAccelerationsAndPotential<<<nBlocksComb,nThreads,nThreads*sizeof(double)>>>(N, *dev_a.buf, *dev_a.buf, block_i.buf, pot_red.in.buf);
+        computeAccelerationsAndPotential<<<nBlocksComb,nThreads,nThreads*sizeof(double)>>>(N, *dev_r.buf, *dev_a.buf, block_i.buf, pot_red.in.buf);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
             throw std::runtime_error("AccelPot, iter:" + std::to_string(i));
 
-        pot_red.reduce(dev_pot.buf+i*nThreads*2);
+        pot_red.reduce(dev_pot.buf+i*nThreads);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
             throw std::runtime_error("AccelPotReduce, iter:" + std::to_string(i));
+
+        cudaMemcpy(t_cbuf.data(), dev_pot.buf+i*nThreads, nThreads*sizeof(double), cudaMemcpyDeviceToHost);
+        printf("iter:%d, pot_red:%lf\n",i,arrSum(t_cbuf.data(), nThreads));
 
         updateVelocityAndPressure<<<nBlocks,nThreads>>>(N, *dev_r.buf, *dev_v.buf, *dev_a.buf, dt, L, pr_red.in.buf);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
             throw std::runtime_error("velPress, iter:" + std::to_string(i));
 
-        pr_red.reduce(dev_pressure.buf+i*nThreads*2);
+        pr_red.reduce(dev_pressure.buf+i*nThreads);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
             throw std::runtime_error("VelPressRed, iter:" + std::to_string(i));
+
+        cudaMemcpy(t_cbuf.data(), dev_pressure.buf+i*nThreads,nThreads*sizeof(double), cudaMemcpyDeviceToHost);
+        printf("iter:%d, pr_red:%lf\n",i,arrSum(t_cbuf.data(), nThreads));
 
         sumOfLengths<<<nBlocks,nThreads,nThreads*sizeof(double)>>>(N, *dev_v.buf, lsum_red.in.buf);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
             throw std::runtime_error("sumLenghts, iter:" + std::to_string(i));
 
-        lsum_red.reduce(dev_lsum.buf+i*nThreads*2);
+        lsum_red.reduce(dev_lsum.buf+i*nThreads);
         error = cudaDeviceSynchronize();
         if(error!=cudaSuccess)
             throw std::runtime_error("sumLenReduce, iter:" + std::to_string(i));
+
+        cudaMemcpy(t_cbuf.data(), dev_lsum.buf+i*nThreads,nThreads*sizeof(double), cudaMemcpyDeviceToHost);
+        printf("iter:%d, lsum_red:%lf\n",i,arrSum(t_cbuf.data(), nThreads));
     }
 
     printf("allocating dev out\n");
     auto dev_pressure_out = DeviceBuffer<double>::newBuffer(NumTime);
     auto dev_lsum_out = DeviceBuffer<double>::newBuffer(NumTime);
     auto dev_pot_out = DeviceBuffer<double>::newBuffer(NumTime);
-    int nBlocksOut = ceil((float)dev_pressure.len/(float)nThreads*2);
+    int nBlocksOut = NumTime;
     printf("reducing out\n");
     reduceSum<<<nBlocksOut,nThreads,nThreads*sizeof(double)>>>(dev_pressure.buf, dev_pressure_out.buf);
     reduceSum<<<nBlocksOut,nThreads,nThreads*sizeof(double)>>>(dev_lsum.buf,dev_lsum_out.buf);
@@ -636,43 +661,10 @@ void initialize(int N, double Tinit, double L, double r[3][MAXPART], double v[3]
 }   
 
 
-//  Function to calculate the averaged velocity squared
-double MeanSquaredVelocity(int N, const double v[3][MAXPART]) { 
-    
-    double vx2 = 0;
-    double vy2 = 0;
-    double vz2 = 0;
-    double v2;
-    
-    for (int i=0; i<N; i++) {
-        
-        vx2 = vx2 + v[0][i]*v[0][i];
-        vy2 = vy2 + v[1][i]*v[1][i];
-        vz2 = vz2 + v[2][i]*v[2][i];
-        
-    }
-    v2 = (vx2+vy2+vz2)/N;
-    
-    
-    //printf("  Average of x-component of velocity squared is %f\n",v2);
-    return v2;
-}
+    //v2 = (vx2+vy2+vz2)/N;
 
-//  Function to calculate the kinetic energy of the system
-double Kinetic(int N, const double v[3][MAXPART]) { 
-        
-    double v20=0.,v21=0.,v22 = 0.;
-    for (int i=0; i<N; i++) {
-        v20 += v[0][i]*v[0][i];
-        v21 += v[1][i]*v[1][i];
-        v22 += v[2][i]*v[2][i];
-    }
-    double kin = m*(v20+v21+v22)/2.;
+//    double kin = m*(v20+v21+v22)/2.;
     
-    //printf("  Total Kinetic Energy is %f\n",N*mvs*m/2.);
-    return kin;
-    
-}
 
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
@@ -753,11 +745,11 @@ __global__ void updateVelocityAndPressure(int N, double r[3][MAXPART], double v[
 // reduce sum arr_in[blockIdx.x * blockDim.x] to arr_out[blockIdx.x]
 __global__ void reduceSum(double *arr_in, double *arr_out){
     unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x*(blockDim.x*2) + threadIdx.x;
+    unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
 
     extern __shared__ double s_arr[];
 
-    s_arr[tid] = arr_in[i] + arr_in[i + blockDim.x];
+    s_arr[tid] = arr_in[i];
     __syncthreads();
 
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
@@ -840,6 +832,7 @@ __global__ void computeAccelerationsAndPotential(int N, const double r[3][MAXPAR
         myAtomicAdd(&a[2][j], -rij[2]);
     }
 
+    __syncthreads();
 
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (tid < s) {
