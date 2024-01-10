@@ -83,6 +83,7 @@ __global__ void updateVelocityAndPressure(int N, double r[3][MAXPART], double v[
 __global__ void reduceSum(double *arr_in, double *arr_out);
 __global__ void sumOfLengths(int N, const double v[3][MAXPART], double* result);
 
+// from https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#atomic-functions
 __device__ double myAtomicAdd(double* address, double val)
 {
     unsigned long long int* address_as_ull =
@@ -454,14 +455,17 @@ int main()
     printf("calculating block_i n:%d\n", nBlocksComb);
     std::vector<uint16_t> cpu_block_i{};
     cpu_block_i.reserve(nBlocksComb);
-    for(uint16_t i=0,j=0;;){
+    for(int i=0,j=0;;){
         j+=nThreads;
-        if(j>=N){
-            i++;
-            j=i+1;
-            if(j>=N)
-                break;
+        if(j>=N-i){
+            while(j>0){
+                i++;
+                j-=(N-i);
+                if(i>=N-1) break;
+            }
+            j*=-1;
         }
+        if(i>=N-1) break;
         cpu_block_i.push_back(i);
     }
 
@@ -481,49 +485,19 @@ int main()
     for (int i=0; i <= NumTime; i++) {
 
         updateVelocityAndPositions<<< nBlocks, nThreads >>>(N, *dev_r.buf, *dev_v.buf, *dev_a.buf, dt);
-        auto error = cudaDeviceSynchronize();
-        if(error!=cudaSuccess)
-            throw std::runtime_error("updVelPos, iter:" + std::to_string(i));
 
         dev_a.memset(0);
         computeAccelerationsAndPotential<<<nBlocksComb,nThreads,nThreads*sizeof(double)>>>(N, *dev_r.buf, *dev_a.buf, block_i.buf, pot_red.in.buf);
-        error = cudaDeviceSynchronize();
-        if(error!=cudaSuccess)
-            throw std::runtime_error("AccelPot, iter:" + std::to_string(i));
 
         pot_red.reduce(dev_pot.buf+i*nThreads);
-        error = cudaDeviceSynchronize();
-        if(error!=cudaSuccess)
-            throw std::runtime_error("AccelPotReduce, iter:" + std::to_string(i));
-
-        cudaMemcpy(t_cbuf.data(), dev_pot.buf+i*nThreads, nThreads*sizeof(double), cudaMemcpyDeviceToHost);
-        printf("iter:%d, pot_red:%lf\n",i,arrSum(t_cbuf.data(), nThreads));
 
         updateVelocityAndPressure<<<nBlocks,nThreads>>>(N, *dev_r.buf, *dev_v.buf, *dev_a.buf, dt, L, pr_red.in.buf);
-        error = cudaDeviceSynchronize();
-        if(error!=cudaSuccess)
-            throw std::runtime_error("velPress, iter:" + std::to_string(i));
 
         pr_red.reduce(dev_pressure.buf+i*nThreads);
-        error = cudaDeviceSynchronize();
-        if(error!=cudaSuccess)
-            throw std::runtime_error("VelPressRed, iter:" + std::to_string(i));
-
-        cudaMemcpy(t_cbuf.data(), dev_pressure.buf+i*nThreads,nThreads*sizeof(double), cudaMemcpyDeviceToHost);
-        printf("iter:%d, pr_red:%lf\n",i,arrSum(t_cbuf.data(), nThreads));
 
         sumOfLengths<<<nBlocks,nThreads,nThreads*sizeof(double)>>>(N, *dev_v.buf, lsum_red.in.buf);
-        error = cudaDeviceSynchronize();
-        if(error!=cudaSuccess)
-            throw std::runtime_error("sumLenghts, iter:" + std::to_string(i));
 
         lsum_red.reduce(dev_lsum.buf+i*nThreads);
-        error = cudaDeviceSynchronize();
-        if(error!=cudaSuccess)
-            throw std::runtime_error("sumLenReduce, iter:" + std::to_string(i));
-
-        cudaMemcpy(t_cbuf.data(), dev_lsum.buf+i*nThreads,nThreads*sizeof(double), cudaMemcpyDeviceToHost);
-        printf("iter:%d, lsum_red:%lf\n",i,arrSum(t_cbuf.data(), nThreads));
     }
 
     printf("allocating dev out\n");
@@ -720,7 +694,7 @@ __global__ void updateVelocityAndPositions(int N, double r[3][MAXPART], double a
     r[2][id] += v[2][id]*dt;
 }
 
-__global__ void updateVelocityAndPressure(int N, double r[3][MAXPART], double v[3][MAXPART], double a[3][MAXPART], double dt, int L, double pressure[MAXPART]){
+__global__ void updateVelocityAndPressure(int N, double r[3][MAXPART], double v[3][MAXPART], double a[3][MAXPART], double dt, int L, double *pressure){
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     if(id>=N) return;
 
@@ -817,7 +791,7 @@ __global__ void computeAccelerationsAndPotential(int N, const double r[3][MAXPAR
         double r2p3 = rSqd*rSqd*rSqd;
         sdata[tid] = 2*4*epsilon*(sigma12/r2p3 - sigma6)/r2p3;
 
-        double f = (48 - 24*r2p3) / rSqd*rSqd*rSqd*rSqd*rSqd*rSqd*rSqd;
+        double f = (48 - 24*r2p3) / (rSqd*rSqd*rSqd*rSqd*rSqd*rSqd*rSqd);
 
         rij[0] *= f; 
         rij[1] *= f; 

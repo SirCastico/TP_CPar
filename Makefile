@@ -17,6 +17,9 @@ MDcuda.exe: $(SRC)/MD.cu
 
 cuda: MDcuda.exe
 
+run:
+	sbatch run.sh
+
 clean:
 	rm ./MDpar.exe ./MDseq.exe
 
